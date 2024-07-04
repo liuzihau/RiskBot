@@ -25,7 +25,7 @@ from risk_shared.records.moves.move_troops_after_attack import MoveTroopsAfterAt
 from risk_shared.records.record_attack import RecordAttack
 from risk_shared.records.types.move_type import MoveType
 
-VERSION = '1.0.0'
+VERSION = '2.0.0'
 CONTINENT = {
     "AU": [38, 39, 41, 40],
     "SA": [28, 31, 29, 30],
@@ -102,11 +102,22 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
     unclaimed_territories = game.state.get_territories_owned_by(None)
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
 
-    # We will try to always pick new territories that are next to ones that we own,
-    # or a random one if that isn't possible.
+    # step 1 check if we can dominent one specific continent
     terrtory = continent_preference(unclaimed_territories, my_territories)
     if terrtory:
         return game.move_claim_territory(query, terrtory)
+    
+    # step 2 check if other player have the chance to dominent one specific continent
+    other_player_id = {0, 1, 2, 3, 4} - {game.state.me.player_id}
+    other_player_territories = {}
+    for pid in other_player_id:
+        other_player_territories[pid] = game.state.get_territories_owned_by(pid)
+    terrtory = block_other_player_occupied_continent(unclaimed_territories, other_player_territories)
+    if terrtory:
+        return game.move_claim_territory(query, terrtory)
+    
+    # step 3 try to maximise the adjacent territory
+    # sub_territories = find_my_largest_connected_territories() TODO
 
     adjacent_territories = game.state.get_all_adjacent_territories(my_territories)
 
@@ -133,19 +144,21 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     After all the territories have been claimed, you can place a single troop on one
     of your territories each turn until each player runs out of troops.
     """
-    
-    # au first
+
+    # Get whole territories
     owned_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-    if set(owned_territories) & set(CONTINENT['AU']) == {38, 39, 40, 41}:
-        return game.move_place_initial_troop(query, 40)
-    for territory in CONTINENT['AU']:
-        if territory in owned_territories:
-            return game.move_place_initial_troop(query, territory)
+
+    # Check our border.
+    border_territories = game.state.get_all_border_territories(owned_territories)
+
+    # Check our dominent continent
+    key_territories = players_dominant_continent(owned_territories)
+    if key_territories:
+        candidates = list(set(border_territories) & set(key_territories))
+        if candidates:
+            return game.move_place_initial_troop(query, candidates[0])
 
     # We will place troops along the territories on our border.
-    border_territories = game.state.get_all_border_territories(
-        game.state.get_territories_owned_by(game.state.me.player_id)
-    )
 
     # We will place a troop in the border territory with the least troops currently
     # on it. This should give us close to an equal distribution.
@@ -399,19 +412,60 @@ def find_shortest_path_from_vertex_to_set(game: Game, source: int, target_set: s
     return path[::-1]
 
 
+# help function
 def continent_preference(unclaimed_territories, my_territories):
-    for territory in CONTINENT['AU']:
-        if territory in unclaimed_territories:
-            return territory
+    pr_list = []
+    for name in ['AU', 'SA', 'AF']:
+        pr_hold = get_current_percentage_to_continent(my_territories, name)
+        pr_potential = get_current_percentage_to_continent(unclaimed_territories, name)
+        pr_list.append((name, pr_hold + pr_potential + PREFER[name]))
+    prefered_name, pr = sorted(pr_list, key=lambda x:x[1])[-1]
+    print(prefered_name)
+    if pr >= 0.50:
+        for territory in CONTINENT[prefered_name]:
+            if territory in unclaimed_territories:
+                return territory
     return None
+
+def block_other_player_occupied_continent(ut, other_player_territories):
+    pr_list = []
+    for pid in other_player_territories:
+        for name in ['AU', 'SA', 'AF']:
+            pr_current = get_current_percentage_to_continent(other_player_territories[pid], name)
+            pr_potential = get_current_percentage_to_continent(ut, name)
+            if pr_current + pr_potential >= 0.9 and pr_current > 0.45:
+                pr_list.append((name, pr_current+pr_potential))
+    if len(pr_list) > 0:
+        name = sorted(pr_list, key=lambda x:x[1])[-1][0]
+        for territory in CONTINENT[name]:
+            if territory in ut:
+                return territory
+    return None
+
+def players_dominant_continent(owned_territories):
+    pr_list = []
+    for name in CONTINENT:
+        pr = get_current_percentage_to_continent(owned_territories, name)
+        if pr > 0.39:
+            pr_list.append((name, pr))
+    if len(pr_list) > 0:
+        name = sorted(pr_list, key=lambda x:x[1])[-1][0]
+        return list(set(owned_territories) & set(CONTINENT[name]))
+    return None
+
+def all_troops_in_the_same_continent_exclude_player():
+    pass
+
+def all_troops_in_the_same_continent_by_player():
+    pass
+
+def find_my_largest_connected_territories():
+    pass
 
 def find_last_adjacent_territories(state, territories):
     pass
 
-def get_possible_percentage(ut, mt, name):
-    return len(set(CONTINENT[name]) & (set(mt) | set(ut)))/len(CONTINENT[name])
-
-def get_current_percentage(mt, name):
+def get_current_percentage_to_continent(mt, name):
     return len(set(CONTINENT[name]) & set(mt))/len(CONTINENT[name])
 
 if __name__ == "__main__":
