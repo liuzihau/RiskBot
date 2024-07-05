@@ -82,6 +82,7 @@ class Bot:
         self.ids_others = []
         self.territories = {}
         self.adjacent_territories = []
+        self.border_territories = []
 
     def update_status(self):
         if self.id_me is None:
@@ -92,7 +93,9 @@ class Bot:
         for pid in self.ids_others:
             self.territories[pid] = self.state.get_territories_owned_by(pid)
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
-    
+        self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
+
+    # Claim Territories
     def choose_adjacent_with_info(self, info):
         territories = list(set(self.adjacent_territories) & set(info))
         if territories:
@@ -183,7 +186,20 @@ class Bot:
             if territory.occupier == self.id_me:
                 my_troops += territory.troops
         return my_troops
+    
+    # Put troops
+    def put_troops_equally_on_border_with_information(self, group):
+        borders = self.state.get_all_border_territories(group)
+        return min(borders, key=lambda x:self.state.territories[x].troops)
 
+    def check_full_control_continent(self):
+        groups = self.get_sorted_connected_group()
+        for name in CONTINENT:
+            for g in groups:
+                if get_percentage_to_continent(g, name) > 0.98:
+                    return g
+        return None
+    
 # We will store our enemy in the bot state.
 class BotState():
     def __init__(self):
@@ -281,6 +297,17 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     After all the territories have been claimed, you can place a single troop on one
     of your territories each turn until each player runs out of troops.
     """
+
+    # step 0 update status
+    game.bot.update_status()
+
+    # senario 1: we control full continent
+    group = game.bot.check_full_control_continent()
+    if group:
+        territory_id = game.bot.put_troops_equally_on_border_with_information(group)
+        write_log(game.log, f"equally distributed troops on the border of our continent {territory_id}")
+        return game.move_place_initial_troop(query, territory_id)
+
 
     # Get whole territories
     owned_territories = game.state.get_territories_owned_by(game.state.me.player_id)
