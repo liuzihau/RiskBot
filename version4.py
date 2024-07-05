@@ -25,8 +25,9 @@ from risk_shared.records.moves.move_troops_after_attack import MoveTroopsAfterAt
 from risk_shared.records.record_attack import RecordAttack
 from risk_shared.records.types.move_type import MoveType
 
-VERSION = '3.0.0'
+VERSION = '4.0.0'
 DEBUG = False
+
 CONTINENT = {
     "AU": [38, 39, 41, 40],
     "SA": [28, 31, 29, 30],
@@ -35,6 +36,7 @@ CONTINENT = {
     "NA": [5, 4, 0, 1, 6, 7, 8, 3, 2],
     "AS": [20, 27, 21, 25, 26, 19, 23, 17, 24, 18, 22, 16]
     }
+
 PREFER = {
     "AU": 0.05,
     "SA": 0.04,
@@ -42,6 +44,24 @@ PREFER = {
     "NA": 0.01,
     "EU": -0.4,
     "AS": -0.6
+    }
+
+DOOR = {
+    "AU": [40],
+    "SA": [29, 30],
+    "AF": [33, 36, 34],
+    "EU": [10, 15, 13, 14],
+    "NA": [4, 0, 2],
+    "AS": [21, 26, 24, 22, 16]
+}
+
+REWARD = {
+        "AU" : 2,
+        "SA" : 2,
+        "AF" : 3,
+        "EU" : 5,
+        "NA" : 5,
+        "AS" : 7
     }
 
 # help function
@@ -66,7 +86,7 @@ def group_connected_territories(mt, state):
         visited[u], parent[u] = False, None
     groups = []
     for u in mt:
-        group = []
+        group = [u]
         if not visited[u]:
             DFS_visit(u)
         groups.append(group)
@@ -83,6 +103,7 @@ class Bot:
         self.territories = {}
         self.adjacent_territories = []
         self.border_territories = []
+        self.plan = None
 
     def update_status(self):
         if self.id_me is None:
@@ -94,6 +115,76 @@ class Bot:
             self.territories[pid] = self.state.get_territories_owned_by(pid)
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
+
+
+    def plan_to_do(self):
+        self.plan = None
+
+        self.occupy_new_continent()
+        if self.plan:
+            return
+        self.interupt_opponunt_continent()
+        if self.plan:
+            return
+        self.minimum_attack()
+        if self.plan:
+            return 
+
+    def occupy_new_continent(self):
+        pair_list = []
+        for name in CONTINENT:
+            enemy_troops = self.enemy_troops_in_continent(name)
+            if enemy_troops == 0:
+                continue
+            my_effect_troops = self.my_effect_troops_in_continent(name)
+            cost = enemy_troops
+            diff = my_effect_troops - enemy_troops
+            if diff < 1:
+                continue
+            door = len(DOOR[name])
+            tids = list(set(self.border_territories) & set(CONTINENT[name]))
+            if len(tids) == 0:
+                continue
+            cids = list(set(CONTINENT[name]) - set(self.territories[self.id_me]))
+            pair_list.append(
+                ((tids, cids), {
+                "cost":cost,
+                "diff":diff,
+                "door":door,
+                "reward":REWARD[name]
+                })
+            )
+        if len(pair_list) > 0:
+            first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
+            self.plan = first_item[0], first_item[1]['diff']
+        return
+
+    def interupt_opponunt_continent(self):
+        self.plan = None
+    
+    def minimum_attack(self):
+        pair_list = []
+        for tid in self.border_territories:
+            current_territory = self.state.territories[tid]
+            candidates = self.state.map.get_adjacent_to(tid)
+            for cid in candidates:
+                adjacent_territory = self.state.territories[cid]
+                if adjacent_territory.occupier == self.id_me:
+                    continue
+                cost = adjacent_territory.troops
+                diff = current_territory.troops - cost - 1 + self.state.me.troops_remaining
+                if diff < 1:
+                    continue
+                pair_list.append(
+                    (([tid], [cid]), {
+                        'cost':cost,
+                        'diff':diff
+                        })
+                    )
+        if len(pair_list):
+            first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
+            self.plan = first_item[0], first_item[1]['diff']
+        return 
 
     # Claim Territories
     def choose_adjacent_with_info(self, info):
@@ -187,8 +278,17 @@ class Bot:
                 my_troops += territory.troops
         return my_troops
     
+    def my_effect_troops_in_continent(self, name):
+        my_troops = self.state.me.troops_remaining
+        effect_territories = list(set(self.border_territories) & set(CONTINENT[name]))
+        for tid in effect_territories:
+            territory = self.state.territories[tid]
+            my_troops += territory.troops - 1  # -1 for the stay troop
+        my_troops -= len(CONTINENT[name]) - len(effect_territories) # every territory we occupied we need to stay 1 troop
+        return my_troops
+
     # Put troops
-    def put_troops_equally_on_border_with_information(self, group):
+    def put_troops_equally_on_border(self, group):
         borders = self.state.get_all_border_territories(group)
         return min(borders, key=lambda x:self.state.territories[x].troops)
 
@@ -199,6 +299,16 @@ class Bot:
                 if get_percentage_to_continent(g, name) > 0.98:
                     return g
         return None
+    
+    def check_our_dominent_continent(self):
+        pr_list = []
+        for name in CONTINENT:
+            pr = get_percentage_to_continent(self.territories[self.id_me], name)
+            pr_list.append((name, pr))
+        name = sorted(pr_list, key=lambda x:x[1])[-1][0]
+        return list(set(CONTINENT[name]) & set(self.territories[self.id_me]))
+        
+
     
 # We will store our enemy in the bot state.
 class BotState():
@@ -304,32 +414,15 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     # senario 1: we control full continent
     group = game.bot.check_full_control_continent()
     if group:
-        territory_id = game.bot.put_troops_equally_on_border_with_information(group)
+        territory_id = game.bot.put_troops_equally_on_border(group)
         write_log(game.log, f"equally distributed troops on the border of our continent {territory_id}")
         return game.move_place_initial_troop(query, territory_id)
 
-
-    # Get whole territories
-    owned_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-
-    # Check our border.
-    border_territories = game.state.get_all_border_territories(owned_territories)
-
-    # Check our dominent continent
-    # key_territories = players_dominant_continent(owned_territories)
-    # if key_territories:
-    #     candidates = list(set(border_territories) & set(key_territories))
-    #     if candidates:
-    #         return game.move_place_initial_troop(query, candidates[0])
-
-    # We will place troops along the territories on our border.
-
-    # We will place a troop in the border territory with the least troops currently
-    # on it. This should give us close to an equal distribution.
-    border_territory_models = [game.state.territories[x] for x in border_territories]
-    min_troops_territory = min(border_territory_models, key=lambda x: x.troops)
-
-    return game.move_place_initial_troop(query, min_troops_territory.territory_id)
+    # senario 2: we have edge in a continent
+    group = game.bot.check_our_dominent_continent()
+    territory_id = game.bot.put_troops_equally_on_border(group)
+    write_log(game.log, f"equally distributed troops on the border of our continent {territory_id}")
+    return game.move_place_initial_troop(query, territory_id)
 
 
 def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards) -> MoveRedeemCards:
@@ -371,21 +464,37 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     all the troops you have available across your territories. This can happen at the start of
     your turn or after killing another player.
     """
-
-    # We will distribute troops across our border territories.
+    # initialise
     total_troops = game.state.me.troops_remaining
     distributions = defaultdict(lambda: 0)
-    border_territories = game.state.get_all_border_territories(
-        game.state.get_territories_owned_by(game.state.me.player_id)
-    )
 
     # We need to remember we have to place our matching territory bonus
     # if we have one.
     if len(game.state.me.must_place_territory_bonus) != 0:
+        print(f"wtf : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}", flush=True)
         assert total_troops >= 2
-        distributions[game.state.me.must_place_territory_bonus[0]] += 2
-        total_troops -= 2
+        for i in game.state.me.must_place_territory_bonus:
+            if i in game.state.get_territories_owned_by(game.state.me.player_id):
+                distributions[i] += 2
+                total_troops -= 2
+                break
+            
+    # step 0
+    game.bot.update_status()
+    game.bot.plan_to_do()
+    if game.bot.plan is not None:
+        src, tgt = game.bot.plan[0]
+        diff = game.bot.plan[1]
+        write_log(game.log, f"plan attack from {src} to {tgt}, total diff troops {diff}")
+        if diff < 5:
+            distributions[src[0]] = total_troops
+            return game.move_distribute_troops(query, distributions)
 
+
+    # We will distribute troops across our border territories.
+    border_territories = game.state.get_all_border_territories(
+        game.state.get_territories_owned_by(game.state.me.player_id)
+    )
 
     # We will equally distribute across border territories in the early game,
     # but start doomstacking in the late game.
