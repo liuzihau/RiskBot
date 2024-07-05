@@ -25,7 +25,7 @@ from risk_shared.records.moves.move_troops_after_attack import MoveTroopsAfterAt
 from risk_shared.records.record_attack import RecordAttack
 from risk_shared.records.types.move_type import MoveType
 
-VERSION = '4.0.0'
+VERSION = '5.0.0'
 DEBUG = False
 
 CONTINENT = {
@@ -104,6 +104,7 @@ class Bot:
         self.adjacent_territories = []
         self.border_territories = []
         self.plan = None
+        self.previous_territories = None
 
     def update_status(self):
         if self.id_me is None:
@@ -480,6 +481,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
                 break
             
     # step 0
+    game.bot.previous_territories = game.bot.territories[game.bot.id_me]
     game.bot.update_status()
     game.bot.plan_to_do()
     if game.bot.plan is not None:
@@ -533,60 +535,112 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     stop attacking (by passing). After a successful attack, you may move troops into the conquered
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
-    
-    # We will attack someone.
-    my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-    bordering_territories = game.state.get_all_adjacent_territories(my_territories)
+    game.bot.update_status()
+    game.bot.plan_to_do()
+    got_territory_this_turn = len(set(game.bot.territories[game.bot.id_me]) - set(game.bot.previous_territories)) > 0
+    if game.bot.plan is not None:
+        src, tgt = game.bot.plan[0]
+        if len(src) == len(tgt) == 1 and got_territory_this_turn:
+            return game.move_attack_pass(query)
+        diff = game.bot.plan[1]
+        src = sorted(src, key=lambda x:game.state.territories[x].troops)
+        write_log(game.log, f"start attack from {src} to {tgt}, total diff troops {diff}")
+        while src and tgt:
+            # from lowest border
+            attacker = src.pop(0)
+            if game.state.territories[attacker].troops == 1:
+                continue 
+            adj = game.state.get_all_adjacent_territories([attacker])
+            tgt_adj = list(set(adj) & set(tgt))
+            tgt_adj = sorted(tgt_adj, key=lambda x:game.state.territories[x].troops)
+            write_log(game.log, f"try choose {attacker} to attack, the adj are: {tgt_adj}")
+            attack_approve = False
+            while tgt_adj:
+                # find safe attack territory
+                taker = tgt_adj.pop(0)
+                potential_atks = list(set(game.bot.territories[game.bot.id_me]) & set(game.state.get_all_adjacent_territories([taker])))
+                atk_troops = 0
+                for atk in potential_atks:
+                    atk_troops = game.state.territories[atk].troops - 1
+                taker_troops = game.state.territories[taker].troops
+                write_log(game.log, f"{attacker} has {atk_troops}, {taker} has {taker_troops}")
+                if atk_troops - taker_troops < 2:
+                    write_log(game.log, f"break to choose higher attacker")
+                    break
 
-    def attack_weakest(territories: list[int]) -> Optional[MoveAttack]:
-        # We will attack the weakest territory from the list.
-        territories = sorted(territories, key=lambda x: game.state.territories[x].troops)
-        for candidate_target in territories:
-            candidate_attackers = sorted(list(set(game.state.map.get_adjacent_to(candidate_target)) & set(my_territories)), key=lambda x: game.state.territories[x].troops, reverse=True)
-            for candidate_attacker in candidate_attackers:
-                if game.state.territories[candidate_attacker].troops > 1:
-                    return game.move_attack(query, candidate_attacker, candidate_target, min(3, game.state.territories[candidate_attacker].troops - 1))
+                # it cannot block all the degree of higher src
+                block = False
+                for s in src:
+                    aaddjj = game.state.get_all_adjacent_territories([s])
+                    deg = len(set(aaddjj) & set(tgt) - {taker})
+                    if deg == 0:
+                        block = True
+                        break
+                if not block:
+                    attack_approve = True
+                    break
+            if attack_approve:
+                return game.move_attack(query, attacker, taker, min(3, game.state.territories[attacker].troops - 1))
+        return game.move_attack_pass(query)
+                
+
+        # attack
 
 
-    if len(game.state.recording) < 4000:
-        # We will check if anyone attacked us in the last round.
-        new_records = game.state.recording[game.state.new_records:]
-        enemy = None
-        for record in new_records:
-            match record:
-                case MoveAttack() as r:
-                    if r.defending_territory in set(my_territories):
-                        enemy = r.move_by_player
 
-        # If we don't have an enemy yet, or we feel angry, this player will become our enemy.
-        if enemy != None:
-            if bot_state.enemy == None or random.random() < 0.05:
-                bot_state.enemy = enemy
+    # # We will attack someone.
+    # my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
+    # bordering_territories = game.state.get_all_adjacent_territories(my_territories)
+
+    # def attack_weakest(territories: list[int]) -> Optional[MoveAttack]:
+    #     # We will attack the weakest territory from the list.
+    #     territories = sorted(territories, key=lambda x: game.state.territories[x].troops)
+    #     for candidate_target in territories:
+    #         candidate_attackers = sorted(list(set(game.state.map.get_adjacent_to(candidate_target)) & set(my_territories)), key=lambda x: game.state.territories[x].troops, reverse=True)
+    #         for candidate_attacker in candidate_attackers:
+    #             if game.state.territories[candidate_attacker].troops > 1:
+    #                 return game.move_attack(query, candidate_attacker, candidate_target, min(3, game.state.territories[candidate_attacker].troops - 1))
+
+
+    # if len(game.state.recording) < 4000:
+    #     # We will check if anyone attacked us in the last round.
+    #     new_records = game.state.recording[game.state.new_records:]
+    #     enemy = None
+    #     for record in new_records:
+    #         match record:
+    #             case MoveAttack() as r:
+    #                 if r.defending_territory in set(my_territories):
+    #                     enemy = r.move_by_player
+
+    #     # If we don't have an enemy yet, or we feel angry, this player will become our enemy.
+    #     if enemy != None:
+    #         if bot_state.enemy == None or random.random() < 0.05:
+    #             bot_state.enemy = enemy
         
-        # If we have no enemy, we will pick the player with the weakest territory bordering us, and make them our enemy.
-        else:
-            weakest_territory = min(bordering_territories, key=lambda x: game.state.territories[x].troops)
-            bot_state.enemy = game.state.territories[weakest_territory].occupier
+    #     # If we have no enemy, we will pick the player with the weakest territory bordering us, and make them our enemy.
+    #     else:
+    #         weakest_territory = min(bordering_territories, key=lambda x: game.state.territories[x].troops)
+    #         bot_state.enemy = game.state.territories[weakest_territory].occupier
             
-        # We will attack their weakest territory that gives us a favourable battle if possible.
-        enemy_territories = list(set(bordering_territories) & set(game.state.get_territories_owned_by(enemy)))
-        move = attack_weakest(enemy_territories)
-        if move != None:
-            return move
+    #     # We will attack their weakest territory that gives us a favourable battle if possible.
+    #     enemy_territories = list(set(bordering_territories) & set(game.state.get_territories_owned_by(enemy)))
+    #     move = attack_weakest(enemy_territories)
+    #     if move != None:
+    #         return move
         
-        # Otherwise we will attack anyone most of the time.
-        if random.random() < 0.8:
-            move = attack_weakest(bordering_territories)
-            if move != None:
-                return move
+    #     # Otherwise we will attack anyone most of the time.
+    #     if random.random() < 0.8:
+    #         move = attack_weakest(bordering_territories)
+    #         if move != None:
+    #             return move
 
-    # In the late game, we will attack anyone adjacent to our strongest territories (hopefully our doomstack).
-    else:
-        strongest_territories = sorted(my_territories, key=lambda x: game.state.territories[x].troops, reverse=True)
-        for territory in strongest_territories:
-            move = attack_weakest(list(set(game.state.map.get_adjacent_to(territory)) - set(my_territories)))
-            if move != None:
-                return move
+    # # In the late game, we will attack anyone adjacent to our strongest territories (hopefully our doomstack).
+    # else:
+    #     strongest_territories = sorted(my_territories, key=lambda x: game.state.territories[x].troops, reverse=True)
+    #     for territory in strongest_territories:
+    #         move = attack_weakest(list(set(game.state.map.get_adjacent_to(territory)) - set(my_territories)))
+    #         if move != None:
+    #             return move
 
     return game.move_attack_pass(query)
 
@@ -626,7 +680,7 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     """At the end of your turn, after you have finished attacking, you may move a number of troops between
     any two of your territories (they must be adjacent)."""
 
-
+    game.bot.plan = None
     # We will always fortify towards the most powerful player (player with most troops on the map) to defend against them.
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     total_troops_per_player = {}
