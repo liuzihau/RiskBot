@@ -347,7 +347,7 @@ class Bot:
             pid_list = self.ids_others
 
         plan_list = []
-        reward_weight = self.clock / 2000
+        reward_weight = self.clock / 500
         for pid in pid_list:
             killing_path = self.find_killing_path(pid)
             if killing_path is not None:
@@ -596,9 +596,9 @@ class Bot:
                             diff = sub_route['diff']
                         wanted_troops = (1 - diff)
                         got_troops = min(total_troops, wanted_troops)
-                        distributions[sub_route["path"][0]] += got_troops
+                        distributions[source] += got_troops
                         total_troops -= got_troops
-                        write_log(self.log, f"[#{self.clock}][Distribute] distributed {got_troops} troops to territory {sub_route['path'][0]} by plan code {self.plan['code']}")
+                        write_log(self.log, f"[#{self.clock}][Distribute] distributed {got_troops} troops to territory {source} by plan code {self.plan['code']}")
                     if total_troops == 0:
                         break
             else:
