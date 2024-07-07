@@ -64,6 +64,11 @@ REWARD = {
         "AS" : 7
     }
 
+DIFF = {
+    0:5,
+    1:5,
+    2:3
+}
 # help function
 def write_log(game, msg):
     if DEBUG:
@@ -96,15 +101,18 @@ def get_percentage_to_continent(mt, name):
     return len(set(CONTINENT[name]) & set(mt))/len(CONTINENT[name])
 
 class Bot:
-    def __init__(self, state):
+    def __init__(self, state, log):
         self.state = state
+        self.log = log
         self.id_me = None
         self.ids_others = []
         self.territories = {}
         self.adjacent_territories = []
         self.border_territories = []
         self.plan = None
-        self.previous_territories = None
+        self.got_territoty_this_turn = False
+        self.clock = 0
+
 
     def update_status(self):
         if self.id_me is None:
@@ -119,52 +127,107 @@ class Bot:
 
 
     def plan_to_do(self):
+        """
+        plan_dict
+        {
+        "code": 0-occupy new continent, 1-block opponunt's, 2-minimum attack, 3-,
+        "from": territory_id,
+        "to": territory_id,
+        "cost":troops that will die,
+        "reward": bonus or card or cut opponunt's edge
+        }
+        """
         self.plan = None
+        occupy_plan_list = self.occupy_new_continent()
+        interupt_plan_list = self.interupt_opponunt_continent()
+        minimum_attack_list = self.minimum_attack()
 
-        self.occupy_new_continent()
-        if self.plan:
+        # write_log(self.log, f"[#{self.clock}] occupy plan : {occupy_plan_list}")
+        # write_log(self.log, f"[#{self.clock}] minimum attack plan : {minimum_attack_list}")
+
+        if occupy_plan_list is not None:
+            self.plan = occupy_plan_list[0]
+            write_log(self.log, f"[#{self.clock}] choose occupy plan {occupy_plan_list[0]}")
             return
-        self.interupt_opponunt_continent()
-        if self.plan:
-            return
-        self.minimum_attack()
-        if self.plan:
-            return 
+        
+        if minimum_attack_list is not None:
+            self.plan = minimum_attack_list[0]
+            write_log(self.log, f"[#{self.clock}] choose minimum attack plan {minimum_attack_list[0]}")
+        
+    def find_border_territories_inside_continent(self, name):
+        continent_plus_adj = set(CONTINENT[name]) | set(self.state.get_all_adjacent_territories(CONTINENT[name]))
+        my_effective_territoies = list(set(self.territories[self.id_me]) & continent_plus_adj)
+        border_territories = []
+        for territory in my_effective_territoies:
+            adj_territories = self.state.map.get_adjacent_to(territory)
+            adj_in_continent = list(set(CONTINENT[name]) & set(adj_territories))
+            for adj_territory in adj_in_continent:
+                if self.state.territories[adj_territory].occupier != self.id_me:
+                    border_territories.append(territory)
+                    break
+        # write_log(self.log, f"count {name}, mine : {my_effective_territoies}, border : {border_territories}, enemy : {enemy_territories}")
+        return border_territories
+    
+    def find_good_attack_source_and_target(self, enemy_territories, border_territories):
+        pair = []
+        for my_territory in border_territories:
+            adj_territories = self.state.map.get_adjacent_to(my_territory)
+            adj_in_continent = list(set(enemy_territories) & set(adj_territories))
+            for adj_territory in adj_in_continent:
+                my_troops = self.state.territories[my_territory].troops
+                enemy_troops = self.state.territories[adj_territory].troops
+                diff = my_troops - 1 - enemy_troops
+                dice = min(3, my_troops - 1)
+                if diff > 0:
+                    pair.append((my_territory, adj_territory, diff, dice))
+        pair = sorted(pair, key=lambda x: (x[2], x[3]), reverse=True)
+        if len(pair) > 0:
+            return pair[0]
 
     def occupy_new_continent(self):
-        pair_list = []
+        """
+        find my border territories in the continent and
+        """
+        plan_list = []
         for name in CONTINENT:
+            enemy_territories = list(set(CONTINENT[name]) - set(self.territories[self.id_me]))
+            if len(enemy_territories) == 0:
+                return
+            border_territories = self.find_border_territories_inside_continent(name)
+            if border_territories is None:
+                continue
             enemy_troops = self.enemy_troops_in_continent(name)
             if enemy_troops == 0:
                 continue
-            my_effect_troops = self.my_effect_troops_in_continent(name)
-            cost = enemy_troops
+            my_effect_troops = self.my_effect_troops_in_continent(name, border_territories)
+            cost = enemy_troops +len(enemy_territories)
             diff = my_effect_troops - enemy_troops
-            if diff < 1:
+            if diff + self.state.me.troops_remaining < 1:
                 continue
-            door = len(DOOR[name])
-            tids = list(set(self.border_territories) & set(CONTINENT[name]))
-            if len(tids) == 0:
-                continue
-            cids = list(set(CONTINENT[name]) - set(self.territories[self.id_me]))
-            pair_list.append(
-                ((tids, cids), {
-                "cost":cost,
-                "diff":diff,
-                "door":door,
-                "reward":REWARD[name]
-                })
-            )
-        if len(pair_list) > 0:
-            first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
-            self.plan = first_item[0], first_item[1]['diff']
+            pair = self.find_good_attack_source_and_target(enemy_territories, border_territories)
+            if pair is not None:
+                plan_list.append(
+                    {
+                        "code": 0,
+                        "name": name,
+                        "from": pair[0],
+                        "to": pair[1],
+                        "cost":cost,
+                        "diff":diff,
+                        "reward": REWARD[name]
+                        }
+                )
+        if len(plan_list) > 0:
+            return plan_list
+            # first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
+            # self.plan = first_item[0], first_item[1]['diff']
         return
 
     def interupt_opponunt_continent(self):
         self.plan = None
     
     def minimum_attack(self):
-        pair_list = []
+        plan_list = []
         for tid in self.border_territories:
             current_territory = self.state.territories[tid]
             candidates = self.state.map.get_adjacent_to(tid)
@@ -173,18 +236,26 @@ class Bot:
                 if adjacent_territory.occupier == self.id_me:
                     continue
                 cost = adjacent_territory.troops
-                diff = current_territory.troops - cost - 1 + self.state.me.troops_remaining
-                if diff < 1:
+                diff = current_territory.troops - cost - 1
+                if diff + self.state.me.troops_remaining < 2:
                     continue
-                pair_list.append(
-                    (([tid], [cid]), {
-                        'cost':cost,
-                        'diff':diff
-                        })
-                    )
-        if len(pair_list):
-            first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
-            self.plan = first_item[0], first_item[1]['diff']
+                for name in CONTINENT:
+                    if cid in CONTINENT[name]:
+                        plan_list.append(
+                            {
+                        "code": 2,
+                        "name": name,
+                        "from": tid,
+                        "to": cid,
+                        "cost":cost,
+                        "diff":diff,
+                        "reward": 0
+                        }
+                )
+        if len(plan_list):
+            return sorted(plan_list, key=lambda x:x['cost'])
+            # first_item = sorted(pair_list, key=lambda x:x[1]['cost'])[0]
+            # self.plan = first_item[0], first_item[1]['diff']
         return 
 
     # Claim Territories
@@ -279,13 +350,12 @@ class Bot:
                 my_troops += territory.troops
         return my_troops
     
-    def my_effect_troops_in_continent(self, name):
-        my_troops = self.state.me.troops_remaining
-        effect_territories = list(set(self.border_territories) & set(CONTINENT[name]))
-        for tid in effect_territories:
+    def my_effect_troops_in_continent(self, name, border_territories):
+        my_troops = 0
+        for tid in border_territories:
             territory = self.state.territories[tid]
-            my_troops += territory.troops - 1  # -1 for the stay troop
-        my_troops -= len(CONTINENT[name]) - len(effect_territories) # every territory we occupied we need to stay 1 troop
+            if territory.troops > 3:  # we banned troops < 3 because we always want to roll 3 dices
+                my_troops += territory.troops - 1  # -1 for the stay troop
         return my_troops
 
     # Put troops
@@ -308,8 +378,21 @@ class Bot:
             pr_list.append((name, pr))
         name = sorted(pr_list, key=lambda x:x[1])[-1][0]
         return list(set(CONTINENT[name]) & set(self.territories[self.id_me]))
-        
+    
+    # Distribute troops
+    def distribute_troops_by_plan(self, total_troops, distributions):
+        if self.plan is not None:
+            need_troops = max(DIFF[self.plan["code"]] - self.plan["diff"], 0)
+            distributed_troops = min(total_troops, need_troops)
+            distributions[self.plan["from"]] += distributed_troops
+            total_troops -= distributed_troops
+            write_log(self.log, f"[#{self.clock}] distributed {distributed_troops} to territory {self.plan['from']} by plan code {self.plan['code']}")
+        return total_troops, distributions
 
+    # Attack
+    def attack_by_plan(self):
+        if self.plan:
+            return self.plan['from'], self.plan['to'], min(3, self.state.territories[self.plan['from']].troops - 1)
     
 # We will store our enemy in the bot state.
 class BotState():
@@ -322,16 +405,18 @@ def main():
     # Get the game object, which will connect you to the engine and
     # track the state of the game.
     game = Game()
-    bot_state = BotState()
-    bot = Bot(game.state) 
-    game.bot = bot
     game.log = './log.txt'
+    bot_state = BotState()
+    bot = Bot(game.state, game.log) 
+    game.bot = bot
 
     # Respond to the engine's queries with your moves.
     while True:
 
         # Get the engine's query (this will block until you receive a query).
         query = game.get_next_query()
+        
+        game.bot.clock = list(query.update.keys())[0]
 
         # Based on the type of query, respond with the correct move.
         def choose_move(query: QueryType) -> MoveType:
@@ -376,31 +461,31 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
     # step 1 Blocking other player occupied whole continentcheck if other player have the chance to dominent one specific continent
     territory = game.bot.block_players()
     if territory:
-        write_log(game, f"decided by block, {territory}")
+        write_log(game, f"[#{game.bot.clock}] decided by block, {territory}")
         return game.move_claim_territory(query, territory)
 
     # step 2 check if we can dominent one specific continent
     territories = game.bot.search_preferred_continent()
     if territories:
         territory = game.bot.choose_adjacent_with_info(territories)
-        write_log(game, f"decided by collect continent, {territory}")
+        write_log(game, f"[#{game.bot.clock}] decided by collect continent, {territory}")
         return game.move_claim_territory(query, territory)
     
     # step 3 try to maximise the adjacent territory
     sorted_group = game.bot.get_sorted_connected_group()
     territory = game.bot.try_to_connect_territory_no_gap(sorted_group)
     if territory:
-        write_log(game, f"decided by connect with possible largest territories, {territory}")
+        write_log(game, f"[#{game.bot.clock}] decided by connect with possible largest territories, {territory}")
         return game.move_claim_territory(query, territory)
     
     territory = game.bot.try_to_connect_territory_1_gap(sorted_group)
     if territory:
-        write_log(game, f"decided by 1 gap with possible largest territories, {territory}")
+        write_log(game, f"[#{game.bot.clock}] decided by 1 gap with possible largest territories, {territory}")
         return game.move_claim_territory(query, territory)
     
     # step 4 pick by degree
     territory = game.bot.pick_by_degree()
-    write_log(game, f"decided by degree, {territory}")
+    write_log(game, f"[#{game.bot.clock}] decided by degree, {territory}")
     return game.move_claim_territory(query, territory)
 
 def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlaceInitialTroop) -> MovePlaceInitialTroop:
@@ -416,13 +501,13 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     group = game.bot.check_full_control_continent()
     if group:
         territory_id = game.bot.put_troops_equally_on_border(group)
-        write_log(game.log, f"equally distributed troops on the border of our continent {territory_id}")
+        write_log(game.log, f"[#{game.bot.clock}] equally distributed troops on the border of our continent {territory_id}")
         return game.move_place_initial_troop(query, territory_id)
 
     # senario 2: we have edge in a continent
     group = game.bot.check_our_dominent_continent()
     territory_id = game.bot.put_troops_equally_on_border(group)
-    write_log(game.log, f"equally distributed troops on the border of our continent {territory_id}")
+    write_log(game.log, f"[#{game.bot.clock}] equally distributed troops on the border of our continent {territory_id}")
     return game.move_place_initial_troop(query, territory_id)
 
 
@@ -472,7 +557,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # We need to remember we have to place our matching territory bonus
     # if we have one.
     if len(game.state.me.must_place_territory_bonus) != 0:
-        print(f"wtf : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}", flush=True)
+        write_log(game.log, f"[#{game.bot.clock}] bonus : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}")
         assert total_troops >= 2
         for i in game.state.me.must_place_territory_bonus:
             if i in game.state.get_territories_owned_by(game.state.me.player_id):
@@ -481,18 +566,14 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
                 break
             
     # step 0
-    game.bot.previous_territories = game.bot.territories[game.bot.id_me]
+    # game.bot.previous_territories = game.bot.territories[game.bot.id_me]
     game.bot.update_status()
     game.bot.plan_to_do()
-    if game.bot.plan is not None:
-        src, tgt = game.bot.plan[0]
-        diff = game.bot.plan[1]
-        write_log(game.log, f"plan attack from {src} to {tgt}, total diff troops {diff}")
-        if diff < 5:
-            distributions[src[0]] += total_troops
-            return game.move_distribute_troops(query, distributions)
+    total_troops, distributions = game.bot.distribute_troops_by_plan(total_troops, distributions)
+    if total_troops == 0:
+        return game.move_distribute_troops(query, distributions)
 
-
+    # step 1 distribute remain troops in effective border
     # We will distribute troops across our border territories.
     border_territories = game.state.get_all_border_territories(
         game.state.get_territories_owned_by(game.state.me.player_id)
@@ -537,51 +618,55 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     """
     game.bot.update_status()
     game.bot.plan_to_do()
-    got_territory_this_turn = len(set(game.bot.territories[game.bot.id_me]) - set(game.bot.previous_territories)) > 0
-    if game.bot.plan is not None:
-        src, tgt = game.bot.plan[0]
-        if len(src) == len(tgt) == 1 and got_territory_this_turn:
-            return game.move_attack_pass(query)
-        diff = game.bot.plan[1]
-        src = sorted(src, key=lambda x:game.state.territories[x].troops)
-        write_log(game.log, f"start attack from {src} to {tgt}, total diff troops {diff}")
-        while src and tgt:
-            # from lowest border
-            attacker = src.pop(0)
-            if game.state.territories[attacker].troops == 1:
-                continue 
-            adj = game.state.get_all_adjacent_territories([attacker])
-            tgt_adj = list(set(adj) & set(tgt))
-            tgt_adj = sorted(tgt_adj, key=lambda x:game.state.territories[x].troops)
-            write_log(game.log, f"try choose {attacker} to attack, the adj are: {tgt_adj}")
-            attack_approve = False
-            while tgt_adj:
-                # find safe attack territory
-                taker = tgt_adj.pop(0)
-                potential_atks = list(set(game.bot.territories[game.bot.id_me]) & set(game.state.get_all_adjacent_territories([taker])))
-                atk_troops = 0
-                for atk in potential_atks:
-                    atk_troops = game.state.territories[atk].troops - 1
-                taker_troops = game.state.territories[taker].troops
-                write_log(game.log, f"{attacker} has {atk_troops}, {taker} has {taker_troops}")
-                if atk_troops - taker_troops < 2:
-                    write_log(game.log, f"break to choose higher attacker")
-                    break
+    information = game.bot.attack_by_plan()
+    if information is not None:
+        attack_territory, target_territory, troops = information
+        return game.move_attack(query, attack_territory, target_territory, troops)
+    return game.move_attack_pass(query)
+    # if game.bot.plan is not None:
+    #     src, tgt = game.bot.plan[0]
+    #     #if len(src) == len(tgt) == 1 #and got_territory_this_turn:
+    #         # return game.move_attack_pass(query)
+    #     diff = game.bot.plan[1]
+    #     src = sorted(src, key=lambda x:game.state.territories[x].troops)
+    #     write_log(game.log, f"[#{game.bot.clock}] start attack from {src} to {tgt}, total diff troops {diff}")
+    #     while src and tgt:
+    #         # from lowest border
+    #         attacker = src.pop(0)
+    #         if game.state.territories[attacker].troops == 1:
+    #             continue 
+    #         adj = game.state.get_all_adjacent_territories([attacker])
+    #         tgt_adj = list(set(adj) & set(tgt))
+    #         tgt_adj = sorted(tgt_adj, key=lambda x:game.state.territories[x].troops)
+    #         write_log(game.log, f"[#{game.bot.clock}] try choose {attacker} to attack, the adj are: {tgt_adj}")
+    #         attack_approve = False
+    #         while tgt_adj:
+    #             # find safe attack territory
+    #             taker = tgt_adj.pop(0)
+    #             potential_atks = list(set(game.bot.territories[game.bot.id_me]) & set(game.state.get_all_adjacent_territories([taker])))
+    #             atk_troops = 0
+    #             for atk in potential_atks:
+    #                 atk_troops = game.state.territories[atk].troops - 1
+    #             taker_troops = game.state.territories[taker].troops
+    #             write_log(game.log, f"[#{game.bot.clock}] {attacker} has {atk_troops}, {taker} has {taker_troops}")
+    #             if atk_troops - taker_troops < 2:
+    #                 write_log(game.log, f"[#{game.bot.clock}] break to choose higher attacker")
+    #                 break
 
-                # it cannot block all the degree of higher src
-                block = False
-                for s in src:
-                    aaddjj = game.state.get_all_adjacent_territories([s])
-                    deg = len(set(aaddjj) & set(tgt) - {taker})
-                    if deg == 0:
-                        block = True
-                        break
-                if not block:
-                    attack_approve = True
-                    break
-            if attack_approve:
-                return game.move_attack(query, attacker, taker, min(3, game.state.territories[attacker].troops - 1))
-        return game.move_attack_pass(query)
+    #             # it cannot block all the degree of higher src
+    #             block = False
+    #             for s in src:
+    #                 aaddjj = game.state.get_all_adjacent_territories([s])
+    #                 deg = len(set(aaddjj) & set(tgt) - {taker})
+    #                 if deg == 0:
+    #                     block = True
+    #                     break
+    #             if not block:
+    #                 attack_approve = True
+    #                 break
+    #         if attack_approve:
+    #             return game.move_attack(query, attacker, taker, min(3, game.state.territories[attacker].troops - 1))
+    #     return game.move_attack_pass(query)
                 
 
         # attack
@@ -642,7 +727,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     #         if move != None:
     #             return move
 
-    return game.move_attack_pass(query)
+    # return game.move_attack_pass(query)
 
 
 def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroopsAfterAttack) -> MoveTroopsAfterAttack:
@@ -680,7 +765,7 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     """At the end of your turn, after you have finished attacking, you may move a number of troops between
     any two of your territories (they must be adjacent)."""
 
-    game.bot.plan = None
+    game.bot.got_territoty_this_turn = False
     # We will always fortify towards the most powerful player (player with most troops on the map) to defend against them.
     my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
     total_troops_per_player = {}
