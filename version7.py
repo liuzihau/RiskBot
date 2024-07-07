@@ -240,28 +240,34 @@ class Bot:
                 self.plan = minimum_attack_list[0]
                 write_log(self.log, f"[#{self.clock}][Plan] choose minimum attack plan {minimum_attack_list[0]}")
 
-        else:
-            if self.plan["code"] == 0:
-                occupy_plan_list = self.occupy_new_continent()
-                if occupy_plan_list is not None:
-                    self.plan = occupy_plan_list[0]
-                    return
-            elif self.plan["code"] == 1:
-                interupt_plan_list = self.interupt_opponunt_continent()
-                if interupt_plan_list is not None:
-                    self.plan = interupt_plan_list[0]
-                    return
-            elif self.plan["code"] == 2:
-                minimum_attack_list = self.minimum_attack()
-                if minimum_attack_list is not None:
-                    self.plan = minimum_attack_list[0]
-                    return
-            elif self.plan["code"] == 3:
-                kill_plan_list = self.kill_player()
-                if kill_plan_list is not None:
-                    self.plan = kill_plan_list[0]
-                    return
-            self.plan = None
+            return
+        
+        src = self.state.territories[self.plan["from"]].troops
+        tgt = self.state.territories[self.plan["to"]].troops
+        if (src > tgt + 3) or (src > tgt and tgt > 20):
+            return
+        
+        if self.plan["code"] == 0:
+            occupy_plan_list = self.occupy_new_continent()
+            if occupy_plan_list is not None:
+                self.plan = occupy_plan_list[0]
+                return
+        elif self.plan["code"] == 1:
+            interupt_plan_list = self.interupt_opponunt_continent()
+            if interupt_plan_list is not None:
+                self.plan = interupt_plan_list[0]
+                return
+        elif self.plan["code"] == 2:
+            minimum_attack_list = self.minimum_attack()
+            if minimum_attack_list is not None:
+                self.plan = minimum_attack_list[0]
+                return
+        elif self.plan["code"] == 3:
+            kill_plan_list = self.kill_player()
+            if kill_plan_list is not None:
+                self.plan = kill_plan_list[0]
+                return
+        self.plan = None
 
     
     def find_border_territories_inside_continent(self, name):
@@ -339,6 +345,7 @@ class Bot:
             pid_list = [self.plan["pid"]]
         else:
             pid_list = self.ids_others
+
         plan_list = []
         reward_weight = self.clock / 2000
         for pid in pid_list:
@@ -1050,7 +1057,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     for pid in game.bot.ids_others:
         if game.state.players[pid].alive:
             survival_players += 1
-    if survival_players > 2:
+    if survival_players > 3:
         game.bot.got_territoty_this_turn = True
     game.bot.update_status()
     game.bot.plan_to_do()
