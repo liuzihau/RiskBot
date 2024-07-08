@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.3'
+VERSION = '9.0.4'
 DEBUG = True
 
 CONTINENT = {
@@ -219,7 +219,7 @@ class Bot:
 
             if kill_plan_list is not None and occupy_plan_list is not None:
                 killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
-                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining >= 1:
+                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
                     occupy_reward = occupy_plan_list[0]['reward'] * 3 - occupy_plan_list[0]['cost']
                     if killing_reward > occupy_reward and killing_reward > 0:
                         self.plan = kill_plan_list[0]
