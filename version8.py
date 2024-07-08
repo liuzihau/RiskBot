@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '8.0.1'
+VERSION = '8.0.2'
 DEBUG = True
 
 CONTINENT = {
@@ -641,11 +641,14 @@ class Bot:
             write_log(self.clock, "AfterAttack", f"{src} and {tgt} both are border, equally put troops {max(max_troops // 2, min_troops)}")
             return max(max_troops // 2, min_troops)
         elif tgt in self.border_territories:
-            write_log(self.clock, "AfterAttack", f"only {tgt} is border, put all troops {max_troops - 1}")
+            write_log(self.clock, "AfterAttack", f"only {tgt} is border, moving all troops {max_troops - 1}")
             return max_troops - 1
-        else:
-            write_log(self.clock, "AfterAttack", f"only {src} is border or no border, put min troops {min_troops}")
+        elif src in self.border_territories:
+            write_log(self.clock, "AfterAttack", f"only {src} is border, moving min troops {min_troops}")
             return min_troops
+        else:
+            write_log(self.clock, "AfterAttack", f"both {src} and {tgt} are not border, moving all troops {max_troops - 1}")
+            return max_troops - 1
         
     def put_troops_on_attack_territory(self, src, tgt, max_troops, min_troops):
         if self.plan is None:
@@ -737,6 +740,7 @@ def main():
     bot_state = BotState()
     bot = Bot(game.state, game.log) 
     game.bot = bot
+    write_log("-1","Version", f"{VERSION}")
 
     # Respond to the engine's queries with your moves.
     while True:
