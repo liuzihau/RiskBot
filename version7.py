@@ -76,9 +76,6 @@ DIFF = {
 # help function
 def write_log(game, msg):
     if DEBUG:
-        with open(game.log, 'a') as f:
-            f.write(f"{msg}\n")
-    else:
         print(msg, flush=True)
 
 def group_connected_territories(mt, state):
@@ -190,7 +187,7 @@ class Bot:
             self.territories[pid] = self.state.get_territories_owned_by(pid)
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
-
+        
     def plan_to_do(self):
         """
         plan_dict
@@ -201,9 +198,20 @@ class Bot:
                         "to": pair[1],
                         "cost":cost,
                         "diff":diff,
-                        "reward": REWARD[name]
+                        "reward": REWARD[name],
+                        ### for occupy ###
+                        "src":[],
+                        "tgt":[]
+                        ### for kill ###
+                        "route":killing_path,
+                        "pid":player_id
                         }
         """
+
+        # give up
+        if self.clock > 11400:
+            self.plan = None
+            return 
         if self.plan is None:
             occupy_plan_list = self.occupy_new_continent()
             kill_plan_list = self.kill_player()
@@ -244,7 +252,7 @@ class Bot:
         
         src = self.state.territories[self.plan["from"]].troops
         tgt = self.state.territories[self.plan["to"]].troops
-        if (src > tgt + 3) or (src > tgt and tgt > 20):
+        if (src > tgt + 1) or (src > tgt and tgt > 20):
             return
         
         if self.plan["code"] == 0:
@@ -623,7 +631,7 @@ class Bot:
 
         if self.plan is None:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
-        if self.plan["code"] == 0:
+        if self.plan["code"] in [0, 3]:
             return self.put_troops_on_attack_territory(src_territory, tgt_territory, max_troops, min_troops)
         elif self.plan["code"] == 1:
             return max_troops - 1
@@ -936,7 +944,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     stop attacking (by passing). After a successful attack, you may move troops into the conquered
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
-    game.bot.update_status()
+    # game.bot.update_status()
     game.bot.plan_to_do()
     information = game.bot.attack_by_plan()
     if information is not None:
@@ -1057,7 +1065,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     for pid in game.bot.ids_others:
         if game.state.players[pid].alive:
             survival_players += 1
-    if survival_players > 3:
+    if survival_players > 3 or game.bot.clock < 3000:
         game.bot.got_territoty_this_turn = True
     game.bot.update_status()
     game.bot.plan_to_do()
