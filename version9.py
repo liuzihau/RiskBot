@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '8.0.4'
+VERSION = '9.0.1'
 DEBUG = True
 
 CONTINENT = {
@@ -70,7 +70,8 @@ DIFF = {
     0:5,
     1:5,
     2:3,
-    3:1
+    3:1,
+    4:1
 }
 
 # help function
@@ -209,21 +210,24 @@ class Bot:
         """
 
         if self.plan is None:
+            
+            # aggressive move
             occupy_plan_list = self.occupy_new_continent()
-            kill_plan_list = None #self.kill_player()
+            kill_plan_list = None # self.kill_player() # TODO
             interupt_plan_list = self.interupt_opponunt_continent()
-
-            # strategic attack for future
-            minimum_attack_list = self.minimum_attack()
 
             if kill_plan_list is not None and occupy_plan_list is not None:
                 killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
-                occupy_reward = occupy_plan_list[0]['reward'] * 3 - occupy_plan_list[0]['cost']
-                if killing_reward > occupy_reward and killing_reward > 0:
+                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining >= 1:
+                    occupy_reward = occupy_plan_list[0]['reward'] * 3 - occupy_plan_list[0]['cost']
+                    if killing_reward > occupy_reward and killing_reward > 0:
+                        self.plan = kill_plan_list[0]
+                        return
+                    elif occupy_reward >= killing_reward and occupy_reward > 0:
+                        self.plan = occupy_plan_list[0]
+                        return
+                elif killing_reward > 0:
                     self.plan = kill_plan_list[0]
-                    return
-                elif occupy_reward >= killing_reward and occupy_reward > 0:
-                    self.plan = occupy_plan_list[0]
                     return
             
             elif kill_plan_list is not None:
@@ -233,9 +237,21 @@ class Bot:
                     return
 
             elif occupy_plan_list is not None:
-                self.plan = occupy_plan_list[0]
-                return
-            
+                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining >= 1:
+                    self.plan = occupy_plan_list[0]
+                    return
+
+
+            # strategic attack for future
+            if occupy_plan_list is not None:
+                terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
+                expension_plan_list = self.choose_territory_minimuize_border(terr_set, border)
+                if expension_plan_list is not None:
+                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 1 and expension_plan_list[0]['border_decrease'] > -2:
+                        self.plan = expension_plan_list[0]
+                        return 
+        
+            minimum_attack_list = self.minimum_attack()
             if minimum_attack_list is not None:
                 self.plan = minimum_attack_list[0]
 
@@ -270,7 +286,34 @@ class Bot:
             
         self.plan = None
 
-    
+    def choose_territory_minimuize_border(self, terr_set, effective_border):
+        if self.got_territoty_this_turn:
+            return
+        origin_border = self.state.get_all_border_territories(terr_set)
+        plan_list = []
+        for src in effective_border:
+            tgts = list(set(self.state.map.get_adjacent_to(src)) - set(self.territories[self.id_me]))
+            for tgt in tgts:
+                new_border = self.state.get_all_border_territories(terr_set + [tgt])
+                border_decrease_count = len(origin_border) - len(new_border)
+                cost = self.state.territories[tgt].troops
+                diff = self.state.territories[src].troops - cost - 1
+                plan_list.append(
+                    {
+                        "code":4,
+                        "name":None,
+                        "from":src,
+                        "to":tgt,
+                        "cost":cost,
+                        "diff":diff,
+                        "border_decrease":border_decrease_count
+                    }
+                )
+            if len(plan_list) > 0:
+                plan_list = sorted(plan_list, key=lambda x:(x["border_decrease"], x['diff']))
+                return plan_list
+            return
+
     def find_border_territories_inside_continent(self, name):
         continent_plus_adj = set(CONTINENT[name]) | set(self.state.get_all_adjacent_territories(CONTINENT[name]))
         my_effective_territoies = list(set(self.territories[self.id_me]) & continent_plus_adj)
@@ -282,7 +325,7 @@ class Bot:
                 if self.state.territories[adj_territory].occupier != self.id_me:
                     border_territories.append(territory)
                     break
-        return border_territories
+        return my_effective_territoies, border_territories
     
     def find_good_attack_source_and_target(self, enemy_territories, border_territories):
         pair = []
@@ -314,7 +357,7 @@ class Bot:
             enemy_territories = list(set(CONTINENT[name]) - set(self.territories[self.id_me]))
             if len(enemy_territories) == 0:
                 continue
-            border_territories = self.find_border_territories_inside_continent(name)
+            my_effective_territories, border_territories = self.find_border_territories_inside_continent(name)
             if border_territories is None:
                 continue
             enemy_troops = self.enemy_troops_in_continent(name)
@@ -323,8 +366,6 @@ class Bot:
             my_effect_troops = self.my_effect_troops_in_continent(name, border_territories)
             cost = enemy_troops + len(enemy_territories)
             diff = my_effect_troops - cost
-            if diff + self.state.me.troops_remaining < 1:
-                continue
             pair = self.find_good_attack_source_and_target(enemy_territories, border_territories)
             if pair is not None:
                 plan_list.append(
@@ -335,7 +376,9 @@ class Bot:
                         "to": pair[1],
                         "cost":cost,
                         "diff":diff,
-                        "reward": REWARD[name]
+                        "reward": REWARD[name],
+                        "my_territories": my_effective_territories,
+                        "border_territories":border_territories
                         }
                 )
         if len(plan_list) > 0:
