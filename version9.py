@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.2'
+VERSION = '9.0.3'
 DEBUG = True
 
 CONTINENT = {
@@ -71,7 +71,8 @@ DIFF = {
     1:5,
     2:3,
     3:1,
-    4:3
+    4:3,
+    5:3
 }
 
 # help function
@@ -245,11 +246,22 @@ class Bot:
             # strategic attack for future
             if occupy_plan_list is not None:
                 terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
-                expension_plan_list = self.choose_territory_minimuize_border(terr_set, border)
+                expension_plan_list = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
                 if expension_plan_list is not None:
-                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 1 and expension_plan_list[0]['border_decrease'] > -2:
+                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -1:
                         self.plan = expension_plan_list[0]
                         return 
+            
+            groups = self.get_sorted_connected_group()
+            largest_group = groups[0]
+            if len(largest_group) > 2:
+                border = list(set(self.border_territories) & set(largest_group))
+                expension_plan_list = self.choose_territory_minimuize_border(largest_group, border)
+                if expension_plan_list is not None:
+                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -1:
+                        self.plan = expension_plan_list[0]
+                        return 
+            
         
             minimum_attack_list = self.minimum_attack()
             if minimum_attack_list is not None:
@@ -286,7 +298,7 @@ class Bot:
             
         self.plan = None
 
-    def choose_territory_minimuize_border(self, terr_set, effective_border):
+    def choose_territory_minimuize_border(self, terr_set, effective_border, name=None):
         if self.got_territoty_this_turn:
             return
         origin_border = self.state.get_all_border_territories(terr_set)
@@ -300,8 +312,8 @@ class Bot:
                 diff = self.state.territories[src].troops - cost - 1
                 plan_list.append(
                     {
-                        "code":4,
-                        "name":None,
+                        "code":4 if name is not None else 5,
+                        "name":name,
                         "from":src,
                         "to":tgt,
                         "cost":cost,
