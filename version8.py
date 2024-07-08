@@ -246,6 +246,9 @@ class Bot:
             tgt = self.state.territories[self.plan["to"]].troops
             if (src > tgt + 1) or (src > tgt and tgt > 10):
                 return
+            elif self.got_territoty_this_turn:
+                self.plan = None
+                return
         
         if self.plan["code"] == 0:
             occupy_plan_list = self.occupy_new_continent()
