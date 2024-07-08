@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.4'
+VERSION = '9.0.5'
 DEBUG = True
 
 CONTINENT = {
@@ -248,7 +248,7 @@ class Bot:
                 terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
                 expension_plan_list = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
                 if expension_plan_list is not None:
-                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -1:
+                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
                         self.plan = expension_plan_list[0]
                         return 
             
@@ -258,7 +258,7 @@ class Bot:
                 border = list(set(self.border_territories) & set(largest_group))
                 expension_plan_list = self.choose_territory_minimuize_border(largest_group, border)
                 if expension_plan_list is not None:
-                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -1:
+                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
                         self.plan = expension_plan_list[0]
                         return 
             
