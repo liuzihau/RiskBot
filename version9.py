@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.1'
+VERSION = '9.0.2'
 DEBUG = True
 
 CONTINENT = {
@@ -71,7 +71,7 @@ DIFF = {
     1:5,
     2:3,
     3:1,
-    4:1
+    4:3
 }
 
 # help function
@@ -310,7 +310,7 @@ class Bot:
                     }
                 )
             if len(plan_list) > 0:
-                plan_list = sorted(plan_list, key=lambda x:(x["border_decrease"], x['diff']))
+                plan_list = sorted(plan_list, key=lambda x:x['diff'] + x["border_decrease"]*2, reverse=True)
                 return plan_list
             return
 
