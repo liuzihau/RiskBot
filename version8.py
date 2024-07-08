@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '8.0.2'
+VERSION = '8.0.4'
 DEBUG = True
 
 CONTINENT = {
@@ -188,7 +188,7 @@ class Bot:
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
         
-    def plan_to_do(self):
+    def plan_to_do(self, attack_phase=False):
         """
         plan_dict
         {
@@ -208,10 +208,6 @@ class Bot:
                         }
         """
 
-        # give up
-        if self.clock > 11400:
-            self.plan = None
-            return 
         if self.plan is None:
             occupy_plan_list = self.occupy_new_continent()
             kill_plan_list = None #self.kill_player()
@@ -245,10 +241,11 @@ class Bot:
 
             return
         
-        src = self.state.territories[self.plan["from"]].troops
-        tgt = self.state.territories[self.plan["to"]].troops
-        if (src > tgt + 1) or (src > tgt and tgt > 20):
-            return
+        if attack_phase:
+            src = self.state.territories[self.plan["from"]].troops
+            tgt = self.state.territories[self.plan["to"]].troops
+            if (src > tgt + 1) or (src > tgt and tgt > 10):
+                return
         
         if self.plan["code"] == 0:
             occupy_plan_list = self.occupy_new_continent()
@@ -270,6 +267,7 @@ class Bot:
             if kill_plan_list is not None:
                 self.plan = kill_plan_list[0]
                 return
+            
         self.plan = None
 
     
@@ -324,7 +322,7 @@ class Bot:
                 continue
             my_effect_troops = self.my_effect_troops_in_continent(name, border_territories)
             cost = enemy_troops + len(enemy_territories)
-            diff = my_effect_troops - enemy_troops
+            diff = my_effect_troops - cost
             if diff + self.state.me.troops_remaining < 1:
                 continue
             pair = self.find_good_attack_source_and_target(enemy_territories, border_territories)
@@ -778,7 +776,6 @@ def main():
                     return handle_fortify(game, bot_state, q)
         
         # Send the move to the engine.
-        game.bot.plan = None
         game.send_move(choose_move(query))
                 
 
@@ -948,7 +945,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
     # game.bot.update_status()
-    game.bot.plan_to_do()
+    game.bot.plan_to_do(True)
     information = game.bot.attack_by_plan()
     if information is not None:
         attack_territory, target_territory, troops = information
@@ -1008,7 +1005,9 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     information = game.bot.fortify_troops()
     if information is not None:
         src, tgt, troops = information
+        game.bot.plan = None
         return game.move_fortify(query, src, tgt, troops)
+    game.bot.plan = None
     return game.move_fortify_pass(query)
 
     # We will always fortify towards the most powerful player (player with most troops on the map) to defend against them.
