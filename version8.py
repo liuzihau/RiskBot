@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '8.0.0'
+VERSION = '8.0.1'
 DEBUG = True
 
 CONTINENT = {
