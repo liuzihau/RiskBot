@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.2'
+VERSION = '12.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -813,8 +813,6 @@ class Bot:
             return max_troops - 1
         elif self.plan["code"] == 3:
             return self.put_troops_on_target_greedy(src_territory, tgt_territory, max_troops, min_troops)
-            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
-            return max_troops - 1
         elif self.plan["code"] in [2, 4, 5]:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
         else:
@@ -830,12 +828,16 @@ class Bot:
             elif group['from'] == src:
                 enemy_territories = group['tgt'] + group['target']
                 other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+
         if other_enemy == 0:
+            write_log(self.clock, "AfterAttack", f"no sharing src with other attack plan move all troops {max_troops - 1}")
             return max_troops - 1
         idle_troops = max_troops - target_enemy - other_enemy - 1
         if idle_troops > 0:
-            return max(min_troops, idle_troops // 2 - 1)
+            write_log(self.clock, "AfterAttack", f"sharing src with other attack plan with extra {idle_troops} troops, moving {max(min_troops, target_enemy + idle_troops // 2 - 1)}")
+            return max(min_troops, target_enemy + idle_troops // 2 - 1)
         else:
+            write_log(self.clock, "AfterAttack", f"sharing src with other attack plan with no extra {idle_troops} troops, give up killing plan and average the troops based on border")
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
 
 
