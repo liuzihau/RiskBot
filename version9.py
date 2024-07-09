@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.5'
+VERSION = '9.06'
 DEBUG = True
 
 CONTINENT = {
@@ -42,8 +42,8 @@ CONTINENT = {
 PREFER = {
     "AU": 0.05,
     "SA": 0.04,
-    "AF": 0.03,
-    "NA": 0.01,
+    "NA": 0.04,
+    "AF": 0.01,
     "EU": -0.4,
     "AS": -0.6
     }
@@ -76,6 +76,15 @@ DIFF = {
 }
 
 # help function
+def a_minus_b(a:list, b:list)->list:
+    return list(set(a) - set(b))
+
+def a_or_b(a:list, b:list)->list:
+    return list(set(a) | set(b))
+
+def a_and_b(a:list, b:list)->list:
+    return list(set(a) & set(b))
+
 def write_log(clock, phase, msg):
     if DEBUG:
         print(f"[#{clock}][{phase}] {msg}", flush=True)
@@ -102,7 +111,6 @@ def group_connected_territories(mt, state):
 
 def get_percentage_to_continent(mt, name):
     return len(set(CONTINENT[name]) & set(mt))/len(CONTINENT[name])
-
 
 def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, target: int, group: list) -> list[int]:
     queue = deque()
@@ -238,7 +246,7 @@ class Bot:
                     return
 
             elif occupy_plan_list is not None:
-                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining >= 1:
+                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
                     self.plan = occupy_plan_list[0]
                     return
 
@@ -252,7 +260,7 @@ class Bot:
                         self.plan = expension_plan_list[0]
                         return 
             
-            groups = self.get_sorted_connected_group()
+            groups = self.get_sorted_connected_group(self.territories[self.id_me])
             largest_group = groups[0]
             if len(largest_group) > 2:
                 border = list(set(self.border_territories) & set(largest_group))
@@ -270,21 +278,28 @@ class Bot:
             return
         
         if attack_phase:
-            src = self.state.territories[self.plan["from"]].troops
-            tgt = self.state.territories[self.plan["to"]].troops
-            if (src > tgt + 1) or (src > tgt and tgt > 10):
-                return
-        
+            if self.plan['code'] == 0:
+                src = self.state.territories[self.plan['groups'][0]["from"]].troops
+                tgt = self.state.territories[self.plan['groups'][0]["to"]].troops
+                if (src > tgt + 1) or (src > tgt and tgt > 10):
+                    return
+            else:
+                src = self.state.territories[self.plan["from"]].troops
+                tgt = self.state.territories[self.plan["to"]].troops
+                if (src > tgt + 1) or (src > tgt and tgt > 10):
+                    return
         if self.plan["code"] == 0:
             occupy_plan_list = self.occupy_new_continent()
             if occupy_plan_list is not None:
                 self.plan = occupy_plan_list[0]
                 return
+            
         elif self.plan["code"] == 1:
             interupt_plan_list = self.interupt_opponunt_continent()
             if interupt_plan_list is not None:
                 self.plan = interupt_plan_list[0]
                 return
+
         elif self.plan["code"] == 2:
             minimum_attack_list = self.minimum_attack()
             if minimum_attack_list is not None:
@@ -297,6 +312,11 @@ class Bot:
                 return
             
         self.plan = None
+
+    def update_plan(self):
+        if self.plan is not None and self.plan['code'] == 0:
+            self.plan = self.find_good_attack_source_and_target(self.plan)
+
 
     def choose_territory_minimuize_border(self, terr_set, effective_border, name=None):
         if self.got_territoty_this_turn:
@@ -326,35 +346,62 @@ class Bot:
                 return plan_list
             return
 
-    def find_border_territories_inside_continent(self, name):
-        continent_plus_adj = set(CONTINENT[name]) | set(self.state.get_all_adjacent_territories(CONTINENT[name]))
-        my_effective_territoies = list(set(self.territories[self.id_me]) & continent_plus_adj)
+    def get_border_territories_within_group(self, group):
+        adjacent_territories = self.state.get_all_adjacent_territories(group)
+        combined_group_and_adjacent = a_or_b(group, adjacent_territories)
+        my_reachable_territories = a_and_b(self.territories[self.id_me], combined_group_and_adjacent)
         border_territories = []
-        for territory in my_effective_territoies:
-            adj_territories = self.state.map.get_adjacent_to(territory)
-            adj_in_continent = list(set(CONTINENT[name]) & set(adj_territories))
-            for adj_territory in adj_in_continent:
+        for territory in my_reachable_territories:
+            adjacent_to_territory = self.state.map.get_adjacent_to(territory)
+            adjacent_within_group = a_and_b(group, adjacent_to_territory)
+            for adj_territory in adjacent_within_group:
                 if self.state.territories[adj_territory].occupier != self.id_me:
                     border_territories.append(territory)
                     break
-        return my_effective_territoies, border_territories
+        return my_reachable_territories, border_territories
     
-    def find_good_attack_source_and_target(self, enemy_territories, border_territories):
-        pair = []
-        for my_territory in border_territories:
-            adj_territories = self.state.map.get_adjacent_to(my_territory)
-            adj_in_continent = list(set(enemy_territories) & set(adj_territories))
-            for adj_territory in adj_in_continent:
-                my_troops = self.state.territories[my_territory].troops
-                enemy_troops = self.state.territories[adj_territory].troops
-                diff = my_troops - 1 - enemy_troops
-                dice = min(3, my_troops - 1)
-                if diff > 0:
-                    pair.append((my_territory, adj_territory, diff, dice))
-        pair = sorted(pair, key=lambda x: (x[2], x[3]), reverse=True)
-        if len(pair) > 0:
-            return pair[0]
+    def find_good_attack_source_and_target(self, plan):
+        K = 1
+        assignable_troops = self.state.me.troops_remaining
+        if plan['diff'] + assignable_troops < 3:
+            return
+        distributions = defaultdict(lambda: 0)
+        for group in plan['groups']:
+            if 'from' in group:
+                group.pop('from') 
+            if 'to' in group:
+                group.pop('to')
 
+            group['enemy_troops'] = self.sum_up_troops(group['tgt'])
+            for tgt in group['tgt']:
+                sub_set = a_minus_b(group['tgt'], [tgt])
+                if len(sub_set) == 0 or len(group_connected_territories(sub_set, self.state)) == 1:
+                    cands = a_and_b(group['src'], self.state.map.get_adjacent_to(tgt))
+                    if not cands:
+                        continue
+                    max_cand = max(cands, key=lambda x: self.state.territories[x].troops-distributions[x])
+                    attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
+                    diff = attack_troops - group['enemy_troops'] - len(group['tgt'])
+                    if diff < K:
+                        assigned_troops = min((K-diff), assignable_troops)
+                    else:
+                        assigned_troops = 0
+                    
+                    if diff + assigned_troops < K:
+                        continue
+
+                    if 'assign_troops' not in group:
+                        group['assign_troops'] = 0
+                    plan['diff'] += assigned_troops
+                    group['assign_troops'] += assigned_troops
+                    assignable_troops -= assigned_troops
+                    distributions[max_cand] += (attack_troops + assigned_troops)
+                    group['from'] = max_cand
+                    group['to'] = tgt
+                    break
+            if 'from' not in group or 'to' not in group:
+                return None
+        return plan
     def occupy_new_continent(self):
         """
         find my border territories in the continent and
@@ -366,34 +413,43 @@ class Bot:
 
         plan_list = []
         for name in name_list:
-            enemy_territories = list(set(CONTINENT[name]) - set(self.territories[self.id_me]))
+            plan = {
+                "code":0,
+                "name":name,
+                "reward": REWARD[name],
+                "groups":[]
+                }
+            enemy_territories = a_minus_b(CONTINENT[name], self.territories[self.id_me])
             if len(enemy_territories) == 0:
                 continue
-            my_effective_territories, border_territories = self.find_border_territories_inside_continent(name)
-            if border_territories is None:
+            ttl_my_reachable_territories, ttl_border_territories = self.get_border_territories_within_group(enemy_territories)
+            if len(ttl_my_reachable_territories) == 0:
                 continue
-            enemy_troops = self.enemy_troops_in_continent(name)
-            if enemy_troops == 0:
-                continue
-            my_effect_troops = self.my_effect_troops_in_continent(name, border_territories)
+            enemy_troops = self.sum_up_troops(enemy_territories)
+            my_troops = self.sum_up_troops(ttl_border_territories)
             cost = enemy_troops + len(enemy_territories)
-            diff = my_effect_troops - cost
-            pair = self.find_good_attack_source_and_target(enemy_territories, border_territories)
-            if pair is not None:
-                plan_list.append(
+            diff = my_troops - cost - len(ttl_border_territories)
+            plan['cost'] = cost
+            plan['diff'] = diff
+            plan['my_territories'] = ttl_my_reachable_territories
+            plan['border_territories'] = ttl_border_territories
+
+            enemy_groups = self.get_sorted_connected_group(enemy_territories)
+            for enemy_group in enemy_groups:
+                my_reachable_territories, border_territories = self.get_border_territories_within_group(enemy_group)
+                if len(my_reachable_territories) == 0:
+                    break
+                plan["groups"].append(
                     {
-                        "code": 0,
-                        "name": name,
-                        "from": pair[0],
-                        "to": pair[1],
-                        "cost":cost,
-                        "diff":diff,
-                        "reward": REWARD[name],
-                        "my_territories": my_effective_territories,
-                        "border_territories":border_territories
+                        "src":border_territories,
+                        "tgt":enemy_group,
                         }
                 )
+            plan = self.find_good_attack_source_and_target(plan)
+            if plan is not None:
+                plan_list.append(plan)
         if len(plan_list) > 0:
+            plan_list = sorted(plan_list, key=lambda x: x['diff'], reverse=True)
             return plan_list
         return
     
@@ -524,8 +580,8 @@ class Bot:
                 return block_territories[0]
         return None
     
-    def get_sorted_connected_group(self):
-        groups = group_connected_territories(self.territories[self.id_me], self.state)
+    def get_sorted_connected_group(self, territories):
+        groups = group_connected_territories(territories, self.state)
         return sorted(groups, key=lambda x:len(x), reverse=True)
     
     def try_to_connect_territory_no_gap(self, sorted_groups):
@@ -582,6 +638,14 @@ class Bot:
             pr_list.append((name, pr_hold + pr_potential + PREFER[name]))
         return pr_list
 
+    def sum_up_troops(self, territoies):
+        troops = 0
+        for tid in territoies:
+            territory = self.state.territories[tid]
+            troops += territory.troops
+        return troops
+    
+    
     def enemy_troops_in_continent(self, name):
         enemy_troops = 0
         candidate_territoies = CONTINENT[name]
@@ -614,7 +678,7 @@ class Bot:
         return min(borders, key=lambda x:self.state.territories[x].troops)
 
     def check_full_control_continent(self):
-        groups = self.get_sorted_connected_group()
+        groups = self.get_sorted_connected_group(self.territories[self.id_me])
         for name in CONTINENT:
             for g in groups:
                 if get_percentage_to_continent(g, name) > 0.98:
@@ -658,6 +722,13 @@ class Bot:
                         write_log(self.clock, 'Distribute', f"distributed {got_troops} troops to territory {source}")
                     if total_troops == 0:
                         break
+            elif self.plan['code'] == 0:
+                for group in self.plan['groups']:
+                    need_troops = group['assign_troops']
+                    distributed_troops = min(total_troops, need_troops)
+                    distributions[group["from"]] += distributed_troops
+                    total_troops -= distributed_troops
+                    write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
             else:
                 need_troops = max(DIFF[self.plan["code"]] - self.plan["diff"], 0)
                 distributed_troops = min(total_troops, need_troops)
@@ -669,7 +740,10 @@ class Bot:
     # Attack
     def attack_by_plan(self):
         if self.plan:
-            return self.plan['from'], self.plan['to'], min(3, self.state.territories[self.plan['from']].troops - 1)
+            if self.plan['code'] == 0:
+                return self.plan['groups'][0]['from'], self.plan['groups'][0]['to'], min(3, self.state.territories[self.plan['groups'][0]['from']].troops - 1)
+            else:
+                return self.plan['from'], self.plan['to'], min(3, self.state.territories[self.plan['from']].troops - 1)
     
     # Troops after Attack
     def moving_troops_based_on_plan_code(self, record_attack, move_attack):
@@ -711,10 +785,10 @@ class Bot:
         if src in potential_border:
             ideal_defend_troops = idle_troops // len(potential_border)
             final_troops = max(min_troops, min(max_troops - 1, ideal_defend_troops))
-            write_log(self.clock, "AfterAttack", f"trying occupy {DOOR[self.plan['name']]}, and {src} is door, put {final_troops} for protecting")
+            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is door, put {final_troops} for protecting")
             return final_troops
         else:
-            write_log(self.clock, "AfterAttack", f"trying occupy {DOOR[self.plan['name']]}, and {src} is not door, put 1")
+            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is not door, put 1")
             return max_troops - 1
 
     # Fortify
@@ -732,7 +806,7 @@ class Bot:
         # find the group wtih continent and find the minimum border for the target
         # If we don't have continent, just choose the minimum border within the biggest group
         reward_pairs = sorted(REWARD.items(), key=lambda x:x[1], reverse=True)
-        groups = self.get_sorted_connected_group()
+        groups = self.get_sorted_connected_group(self.territories[self.id_me])
         for name, reward in reward_pairs:
             if set(CONTINENT[name]) & set(self.territories[self.id_me]) != set(CONTINENT[name]):
                 continue
@@ -857,7 +931,7 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
         return game.move_claim_territory(query, territory)
     
     # step 3 try to maximise the adjacent territory
-    sorted_group = game.bot.get_sorted_connected_group()
+    sorted_group = game.bot.get_sorted_connected_group(game.bot.territories[game.bot.id_me])
     territory = game.bot.try_to_connect_territory_no_gap(sorted_group)
     if territory:
         write_log(game.bot.clock, "Claim", f"decided by connect with possible largest territories, {territory}")
@@ -999,8 +1073,9 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     stop attacking (by passing). After a successful attack, you may move troops into the conquered
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
-    # game.bot.update_status()
-    game.bot.plan_to_do(True)
+    game.bot.update_status()
+    game.bot.update_plan()
+    write_log(game.bot.clock, 'Attack', f"plan: {game.bot.plan}")
     information = game.bot.attack_by_plan()
     if information is not None:
         attack_territory, target_territory, troops = information
@@ -1020,7 +1095,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
         game.bot.got_territoty_this_turn = True
     game.bot.update_status()
     game.bot.plan_to_do()
-
+    
     # First we need to get the record that describes the attack, and then the move that specifies
     # which territory was the attacking territory.
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
@@ -1028,10 +1103,6 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
 
     moving_troops = game.bot.moving_troops_based_on_plan_code(record_attack, move_attack)
     return game.move_troops_after_attack(query, moving_troops)
-
-    # We will always move the maximum number of troops we can.
-    return game.move_troops_after_attack(query, game.state.territories[move_attack.attacking_territory].troops - 1)
-
 
 def handle_defend(game: Game, bot_state: BotState, query: QueryDefend) -> MoveDefend:
     """
@@ -1065,31 +1136,6 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     game.bot.plan = None
     return game.move_fortify_pass(query)
 
-    # We will always fortify towards the most powerful player (player with most troops on the map) to defend against them.
-    my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-    total_troops_per_player = {}
-    for player in game.state.players.values():
-        total_troops_per_player[player.player_id] = sum([game.state.territories[x].troops for x in game.state.get_territories_owned_by(player.player_id)])
-
-    most_powerful_player = max(total_troops_per_player.items(), key=lambda x: x[1])[0]
-
-    # If we are the most powerful, we will pass.
-    if most_powerful_player == game.state.me.player_id:
-        return game.move_fortify_pass(query)
-    
-    # Otherwise we will find the shortest path between our territory with the most troops
-    # and any of the most powerful player's territories and fortify along that path.
-    candidate_territories = game.state.get_all_border_territories(my_territories)
-    most_troops_territory = max(candidate_territories, key=lambda x: game.state.territories[x].troops)
-
-    # To find the shortest path, we will use a custom function.
-    shortest_path = find_shortest_path_from_vertex_to_set(game.state, most_troops_territory, set(game.state.get_territories_owned_by(most_powerful_player)))
-    # We will move our troops along this path (we can only move one step, and we have to leave one troop behind).
-    # We have to check that we can move any troops though, if we can't then we will pass our turn.
-    if len(shortest_path) > 0 and game.state.territories[most_troops_territory].troops > 1:
-        return game.move_fortify(query, shortest_path[0], shortest_path[1], game.state.territories[most_troops_territory].troops - 1)
-    else:
-        return game.move_fortify_pass(query)
 
 
 if __name__ == "__main__":
