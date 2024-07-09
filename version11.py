@@ -27,9 +27,10 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '11.0.0'
+VERSION = '11.0.1'
 DEBUG = True
 
+WHOLEMAP = [i for i in range(42)]
 CONTINENT = {
     "AU": [38, 39, 41, 40],
     "SA": [28, 31, 29, 30],
@@ -135,15 +136,15 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
     path.append(current)
     return path[::-1]
 
-def dijkstra(state, source: int, targets: list, enemy_territories) -> tuple:
+def dijkstra(state, src: int, targets: list, enemy_territories) -> tuple:
     # Initialize the priority queue
     pq = []
     distances = {vertex: float('infinity') for vertex in enemy_territories}
-    previous_vertices = {source:None}
+    previous_vertices = {src:None}
 
     # Set the distance for start vertices
-    distances[source] = 0
-    heapq.heappush(pq, (0, source))
+    distances[src] = 0
+    heapq.heappush(pq, (0, src))
 
     while pq:
         current_distance, current_vertex = heapq.heappop(pq)
@@ -158,7 +159,7 @@ def dijkstra(state, source: int, targets: list, enemy_territories) -> tuple:
                 return path[::-1], current_distance, target
 
         # Process each neighbor
-        neighbors = list(set(state.map.get_adjacent_to(current_vertex)) & set(enemy_territories))
+        neighbors = a_and_b(state.map.get_adjacent_to(current_vertex), enemy_territories)
 
         for neighbor in neighbors:
             distance = current_distance + state.territories[neighbor].troops
@@ -222,9 +223,15 @@ class Bot:
             
         # aggressive move
         occupy_plan_list = self.occupy_new_continent()
-        kill_plan_list = None # self.kill_player() # TODO
+        kill_plan_list = None if self.state.card_sets_redeemed < 6 else self.kill_player()
         interupt_plan_list = self.interupt_opponunt_continent() #TODO
-
+        
+        ###### debug #######
+        if kill_plan_list is not None:
+            self.plan = kill_plan_list[0]
+            print(f"[Kill] {self.plan}", flush=True)
+            return
+        
         if kill_plan_list is not None and occupy_plan_list is not None:
             killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
             if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
@@ -403,10 +410,6 @@ class Bot:
         return plan
     
     def occupy_new_continent(self):
-        """
-        find my border territories in the continent and
-        """
-
         plan_list = []
         for name in CONTINENT:
             plan = {
@@ -450,80 +453,87 @@ class Bot:
         return
     
     def kill_player(self):
-        if self.plan is not None:
-            pid_list = [self.plan["pid"]]
-        else:
-            pid_list = self.ids_others
-
         plan_list = []
-        reward_weight = self.clock / 500
-        for pid in pid_list:
-            killing_path = self.find_killing_path(pid)
-            if killing_path is not None:
+        my_troops = self.sum_up_troops(self.border_territories) - len(self.border_territories)
+        for pid in self.ids_others:
+            
+            if not self.state.players[pid].alive:
+                continue
+            troops_edge = my_troops - self.state.players[pid].troops_remaining - len(self.territories[pid])
+            if troops_edge < 10:
+                continue
+
+            plan = {
+                'code':3, 
+                'name':None,
+                'reward': (self.state.card_sets_redeemed - 3) * self.state.players[pid].card_count * 1.5,
+                'groups':[],
+                'my_territories': self.territories[self.id_me], 
+                'border_territories': self.border_territories
+            }
+            if plan['reward'] == 0 or self.state.players[pid].card_count < 2:
+                continue
+
+            plan['groups'] = self.find_killing_path(pid)
+            if plan['groups'] is not None:
                 total_cost = 0
                 total_diff = 0
-                for r in killing_path:
-                    total_cost += r["cost"]
-                    if r['diff'] < 1:
-                        total_diff -= (r["diff"]+1)
-                plan_list.append(
-                    {
-                        "code":3,
-                        "name":None,
-                        "from":killing_path[0]['path'][0],
-                        "to":killing_path[0]['path'][1],
-                        "cost":total_cost,
-                        "diff":total_diff,
-                        "reward":reward_weight * self.state.players[pid].card_count,
-                        "route":killing_path,
-                        "pid":pid
-                    }
-                )
+                for group_plan in plan['groups']:
+                    total_cost += group_plan["enemy_troops"]
+                    total_diff += group_plan["my_troops"] - group_plan["enemy_troops"] + len(group_plan["tgt"]) + len(group_plan['target'])
+                plan['cost'] = total_cost
+                plan['diff'] = total_diff
+                if total_diff > 2:
+                    plan_list.append(plan)
         if len(plan_list) > 0:
+            plan_list = sorted(plan_list, key=lambda x:x['diff'], reverse=True)
             return plan_list
         
     def find_killing_path(self, target_id):
-        enemy_territories = set()
-        for pid in self.ids_others:
-            enemy_territories = enemy_territories | set(self.territories[pid])
-        enemy_territories = list(enemy_territories)
-
+        enemy_territories = a_minus_b(WHOLEMAP, self.territories[self.id_me])
         target_groups = group_connected_territories(self.territories[target_id], self.state)
-        route = self.find_shortest_cost_from_group_to_group(self.border_territories, target_groups, enemy_territories)
-        if route is not None:
-            troops_needed = 0
-            for sub_route in route:
-                sub_route["diff"] = sub_route['path'][0] - sub_route["cost"] - len(sub_route['path'] + sub_route['target'])
-                if sub_route["diff"] < 1:
-                    troops_needed -= (sub_route['diff'] - 1)
-            if self.state.me.troops_remaining > troops_needed:
-                return route
+        return self.find_shortest_cost_from_group_to_group(self.border_territories, target_groups, enemy_territories)
 
-    def find_shortest_cost_from_group_to_group(self, sources: list, targets: list, enemy_territories) -> Union[list[int], None]:
-        route = []
+    def find_shortest_cost_from_group_to_group(self, srcs: list, targets: list, enemy_territories) -> Union[list[int], None]:
+        criteria = 4
+        groups = []
+        assignable_troops = self.state.me.troops_remaining
         while len(targets) > 0:
             paths = []
-            for source in sources:
-                path, cost, target = dijkstra(self.state, source, targets, enemy_territories)
+            for src in srcs:
+                path, enemy_troops, target = dijkstra(self.state, src, targets, enemy_territories)
                 if path is None:
                     continue
-                for tid in target:
-                    cost += self.state.territories[tid].troops
                 paths.append(
                     {
-                        "path":path,
-                        "cost":cost,
+                        'src':[path[0]],
+                        "tgt":path[1:],
+                        "enemy_troops":enemy_troops,
+                        "my_troops":self.state.territories[src].troops,
+                        "from": path[0],
+                        "to": path[1],
                         "target":target
                                 }
                 )
-            chosen_path = min(paths, key=lambda x:x['cost'])
-            route.append(chosen_path)
-            targets.remove(chosen_path["target"])
-            sources = list(set(sources) | set(chosen_path["path"]) | set(chosen_path["target"]))
-            enemy_territories = list(set(enemy_territories) - set(sources))
+            chosen_path = min(paths, key=lambda x:x['enemy_troops'])
+            for tid in chosen_path['target']:
+                chosen_path["enemy_troops"] += self.state.territories[tid].troops
+            my_active_troops = assignable_troops + chosen_path['my_troops'] - 1
+            minimum_needed_troops = chosen_path['enemy_troops'] + len(chosen_path['tgt'])
+            if my_active_troops - minimum_needed_troops <= criteria:
+                groups = None
+                break
+            chosen_path['assign_troops'] = max(0, (criteria + minimum_needed_troops + 1 - chosen_path['my_troops']))
+            assignable_troops -= chosen_path['assign_troops']
+            groups.append(chosen_path)
+
+            targets.remove(chosen_path['target'])
+            new_added_terrs = a_or_b(chosen_path["src"] + chosen_path["tgt"], chosen_path['target'])
+            srcs = a_or_b(srcs, new_added_terrs)
+            enemy_territories = a_minus_b(enemy_territories, srcs)
+            srcs = self.state.get_all_adjacent_territories(enemy_territories)
         
-        if len(route) > 0:
-            return route
+        return groups
         
     def interupt_opponunt_continent(self):
         pass
@@ -700,39 +710,17 @@ class Bot:
     # Distribute troops
     def distribute_troops_by_plan(self, total_troops, distributions):
         if self.plan is not None:
-            if self.plan["code"] == 3:
-                for sub_route in self.plan["route"]:
-                    if sub_route['diff'] < 1:
-                        source = sub_route['path'][0]
-                        diff = 0
-                        found_new_source = False
-                        while source not in self.territories[self.id_me]:
-                            for s in self.plan["route"]:
-                                if source in s['path'][1:]:
-                                    source = s["path"][0]
-                                    diff = diff + s['diff'] + sub_route['diff']
-                                    found_new_source = True
-                                    break
-                            if not found_new_source:
-                                break
-                        if not found_new_source:
-                            continue
-                        else:
-                            diff = sub_route['diff']
-                        wanted_troops = (1 - diff)
-                        got_troops = min(total_troops, wanted_troops)
-                        distributions[source] += got_troops
-                        total_troops -= got_troops
-                        write_log(self.clock, 'Distribute', f"distributed {got_troops} troops to territory {source}")
-                    if total_troops == 0:
-                        break
-            else:
-                for group in self.plan['groups']:
-                    need_troops = group['assign_troops']
-                    distributed_troops = min(total_troops, need_troops)
-                    distributions[group["from"]] += distributed_troops
-                    total_troops -= distributed_troops
-                    write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
+            for group in self.plan['groups']:
+                if group['from'] not in self.territories[self.id_me]:
+                    while group['from'] not in self.territories[self.id_me]:
+                        for g in self.plan["groups"]:
+                            if group['from'] in g['tgt']:
+                                group = g
+                need_troops = group['assign_troops']
+                distributed_troops = min(total_troops, need_troops)
+                distributions[group["from"]] += distributed_troops
+                total_troops -= distributed_troops
+                write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
         return total_troops, distributions
 
     def distribute_troops_to_connected_border(self, total_troops, distributions):
@@ -790,6 +778,9 @@ class Bot:
             write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         elif self.plan["code"] == 2:
+            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
+            return max_troops - 1
+        elif self.plan["code"] in [2, 4, 5]:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
         else:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
@@ -1157,11 +1148,10 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     game.bot.update_status()
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     # if game.bot.clock > 2000:
-    #     for pid in range(5):
-    #         print(game.state.players[pid], flush=True)
     #     for record in game.state.recording:
     #         if record.record_type == 'move_redeem_cards':
     #             print(record, flush=True)
+    #     print(game.state.card_sets_redeemed, flush=True)
     #     raise
 
 
