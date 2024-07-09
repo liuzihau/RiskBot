@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.3'
+VERSION = '12.0.4'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -523,22 +523,32 @@ class Bot:
                     {
                         'src':[path[0]],
                         "tgt":path[1:],
-                        "enemy_troops":troops_diff + self.state.territories[src].troops + 1,
+                        "enemy_troops":troops_diff + (self.state.territories[src].troops - allocated_troops[src] - 1),
                         "my_troops":self.state.territories[src].troops,
                         "from": path[0],
                         "to": path[1],
                         "target":target
                                 }
                 )
-            chosen_path = max(paths, key=lambda x:x['my_troops'] - x['enemy_troops'])
-            write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
-            for tid in chosen_path['target']:
-                chosen_path["enemy_troops"] += self.state.territories[tid].troops
-            my_active_troops = assignable_troops + chosen_path['my_troops'] - allocated_troops[chosen_path['from']] - 1
-            minimum_needed_troops = chosen_path['enemy_troops'] + len(chosen_path['tgt'])
-            if my_active_troops - minimum_needed_troops <= criteria:
+            chosen_paths = sorted(paths, key=lambda x:x['my_troops'] - x['enemy_troops'], reverse=True)
+            # 1st try
+            chosen_paths = sorted(paths, key=lambda x:len(x['tgt']))
+            chosen_path = None
+            while len(chosen_paths) > 0:
+                cand = chosen_paths.pop(0)
+                for tid in cand['target']:
+                    cand["enemy_troops"] += self.state.territories[tid].troops
+                my_active_troops = assignable_troops + cand['my_troops'] - allocated_troops[cand['from']] - 1
+                minimum_needed_troops = cand['enemy_troops'] + len(cand['tgt'])
+                if my_active_troops - minimum_needed_troops > criteria:
+                    chosen_path = cand
+                    break
+            if chosen_path is None:
                 groups = None
                 break
+
+            write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
+            
             chosen_path['assign_troops'] = max(0, (criteria + minimum_needed_troops + 1 - chosen_path['my_troops']))
             allocated_troops[chosen_path['from']] += minimum_needed_troops + criteria
             assignable_troops -= chosen_path['assign_troops']
