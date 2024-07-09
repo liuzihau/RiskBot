@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.7'
+VERSION = '9.0.8'
 DEBUG = True
 
 CONTINENT = {
@@ -169,8 +169,6 @@ def dijkstra(state, source: int, targets: list, enemy_territories) -> tuple:
                 heapq.heappush(pq, (distance, neighbor))
 
     return None, float('infinity'), None
-
-
 
 
 class Bot:
@@ -403,7 +401,7 @@ class Bot:
                         continue
                     max_cand = max(cands, key=lambda x: self.state.territories[x].troops-distributions[x])
                     attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
-                    diff = attack_troops - group['enemy_troops'] - len(group['tgt'])
+                    diff = attack_troops - group['enemy_troops']
                     if diff < K:
                         assigned_troops = min((K-diff), assignable_troops)
                     else:
@@ -1106,7 +1104,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     last_record = cast(RecordAttack, game.state.recording)[-1]
     if last_record.record_type == 'move_troops_after_attack':
         game.bot.plan_to_do()
-    else:
+    elif last_record.record_type != 'move_distribute_troops':
         game.bot.update_plan()
     write_log(game.bot.clock, 'Attack', f"plan: {game.bot.plan}")
     information = game.bot.attack_by_plan()
