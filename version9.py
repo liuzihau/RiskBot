@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.0.8'
+VERSION = '9.0.9'
 DEBUG = True
 
 CONTINENT = {
@@ -196,7 +196,7 @@ class Bot:
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
         
-    def plan_to_do(self, attack_phase=False):
+    def plan_to_do(self):
         """
         plan
                     {
@@ -218,101 +218,87 @@ class Bot:
                     'border_territories': [8, 3]
                     }
         """
-
-        if self.plan is None:
             
-            # aggressive move
-            occupy_plan_list = self.occupy_new_continent()
-            kill_plan_list = None # self.kill_player() # TODO
-            interupt_plan_list = self.interupt_opponunt_continent()
+        # aggressive move
+        occupy_plan_list = self.occupy_new_continent()
+        kill_plan_list = None # self.kill_player() # TODO
+        interupt_plan_list = self.interupt_opponunt_continent()
 
-            if kill_plan_list is not None and occupy_plan_list is not None:
-                killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
-                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
-                    occupy_reward = occupy_plan_list[0]['reward'] * 3 - occupy_plan_list[0]['cost']
-                    if killing_reward > occupy_reward and killing_reward > 0:
-                        self.plan = kill_plan_list[0]
-                        return
-                    elif occupy_reward >= killing_reward and occupy_reward > 0:
-                        self.plan = occupy_plan_list[0]
-                        return
-                elif killing_reward > 0:
+        if kill_plan_list is not None and occupy_plan_list is not None:
+            killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
+            if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
+                occupy_reward = occupy_plan_list[0]['reward'] * 3 - occupy_plan_list[0]['cost']
+                if killing_reward > occupy_reward and killing_reward > 0:
                     self.plan = kill_plan_list[0]
                     return
-            
-            elif kill_plan_list is not None:
-                killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
-                if killing_reward > 0:
-                    self.plan = kill_plan_list[0]
-                    return
-
-            elif occupy_plan_list is not None:
-                if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
+                elif occupy_reward >= killing_reward and occupy_reward > 0:
                     self.plan = occupy_plan_list[0]
                     return
-
-
-            # strategic attack for future
-            if occupy_plan_list is not None:
-                terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
-                expension_plan_list = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
-                if expension_plan_list is not None:
-                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
-                        self.plan = expension_plan_list[0]
-                        return 
-            
-            groups = self.get_sorted_connected_group(self.territories[self.id_me])
-            largest_group = groups[0]
-            if len(largest_group) > 2:
-                border = list(set(self.border_territories) & set(largest_group))
-                expension_plan_list = self.choose_territory_minimuize_border(largest_group, border)
-                if expension_plan_list is not None:
-                    if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
-                        self.plan = expension_plan_list[0]
-                        return 
-            
-        
-            minimum_attack_list = self.minimum_attack()
-            if minimum_attack_list is not None:
-                self.plan = minimum_attack_list[0]
-
-            return
-        
-        if attack_phase:
-            if self.plan['code'] == 0:
-                src = self.state.territories[self.plan['groups'][0]["from"]].troops
-                tgt = self.state.territories[self.plan['groups'][0]["to"]].troops
-                if (src > tgt + 1) or (src > tgt and tgt > 10):
-                    return
-            else:
-                src = self.state.territories[self.plan["from"]].troops
-                tgt = self.state.territories[self.plan["to"]].troops
-                if (src > tgt + 1) or (src > tgt and tgt > 10):
-                    return
-        if self.plan["code"] == 0:
-            occupy_plan_list = self.occupy_new_continent()
-            if occupy_plan_list is not None:
-                self.plan = occupy_plan_list[0]
-                return
-            
-        elif self.plan["code"] == 1:
-            interupt_plan_list = self.interupt_opponunt_continent()
-            if interupt_plan_list is not None:
-                self.plan = interupt_plan_list[0]
-                return
-
-        elif self.plan["code"] == 2:
-            minimum_attack_list = self.minimum_attack()
-            if minimum_attack_list is not None:
-                self.plan = minimum_attack_list[0]
-                return
-        elif self.plan["code"] == 3:
-            kill_plan_list = self.kill_player()
-            if kill_plan_list is not None:
+            elif killing_reward > 0:
                 self.plan = kill_plan_list[0]
                 return
+        
+        elif kill_plan_list is not None:
+            killing_reward = kill_plan_list[0]['reward'] * 3 - kill_plan_list[0]['cost']
+            if killing_reward > 0:
+                self.plan = kill_plan_list[0]
+                return
+
+        elif occupy_plan_list is not None:
+            if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
+                self.plan = occupy_plan_list[0]
+                return
+
+
+        # strategic attack for future
+        if occupy_plan_list is not None:
+            terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
+            expension_plan_list = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
+            if expension_plan_list is not None:
+                if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
+                    self.plan = expension_plan_list[0]
+                    return 
+        
+        groups = self.get_sorted_connected_group(self.territories[self.id_me])
+        largest_group = groups[0]
+        if len(largest_group) > 2:
+            border = list(set(self.border_territories) & set(largest_group))
+            expension_plan_list = self.choose_territory_minimuize_border(largest_group, border)
+            if expension_plan_list is not None:
+                if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
+                    self.plan = expension_plan_list[0]
+                    return 
+        
+    
+        minimum_attack_list = self.minimum_attack()
+        if minimum_attack_list is not None:
+            self.plan = minimum_attack_list[0]
+
+        return
+
+        # if self.plan["code"] == 0:
+        #     occupy_plan_list = self.occupy_new_continent()
+        #     if occupy_plan_list is not None:
+        #         self.plan = occupy_plan_list[0]
+        #         return
             
-        self.plan = None
+        # elif self.plan["code"] == 1:
+        #     interupt_plan_list = self.interupt_opponunt_continent()
+        #     if interupt_plan_list is not None:
+        #         self.plan = interupt_plan_list[0]
+        #         return
+
+        # elif self.plan["code"] == 2:
+        #     minimum_attack_list = self.minimum_attack()
+        #     if minimum_attack_list is not None:
+        #         self.plan = minimum_attack_list[0]
+        #         return
+        # elif self.plan["code"] == 3:
+        #     kill_plan_list = self.kill_player()
+        #     if kill_plan_list is not None:
+        #         self.plan = kill_plan_list[0]
+        #         return
+            
 
     def update_plan(self):
         if self.plan is None:
@@ -422,17 +408,14 @@ class Bot:
             if 'from' not in group or 'to' not in group:
                 return None
         return plan
+    
     def occupy_new_continent(self):
         """
         find my border territories in the continent and
         """
-        if self.plan is not None:
-            name_list = [self.plan['name']]
-        else:
-            name_list = CONTINENT
 
         plan_list = []
-        for name in name_list:
+        for name in CONTINENT:
             plan = {
                 "code":0,
                 "name":name,
@@ -777,10 +760,13 @@ class Bot:
         if self.plan["code"] == 0:
             return self.put_troops_on_attack_territory(src_territory, tgt_territory, max_troops, min_troops)
         elif self.plan["code"] == 1:
+            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         elif self.plan["code"] == 2:
+            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         else:
+            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
 
     def put_troops_on_border(self, src, tgt, max_troops, min_troops):
@@ -1103,6 +1089,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     game.bot.update_status()
     last_record = cast(RecordAttack, game.state.recording)[-1]
     if last_record.record_type == 'move_troops_after_attack':
+        game.bot.plan = None
         game.bot.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
         game.bot.update_plan()
@@ -1153,14 +1140,13 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     any two of your territories (they must be adjacent)."""
 
     game.bot.update_status()
-    game.bot.plan_to_do()
+    game.bot.plan = None
+
     game.bot.got_territoty_this_turn = False
     information = game.bot.fortify_troops()
     if information is not None:
         src, tgt, troops = information
-        game.bot.plan = None
         return game.move_fortify(query, src, tgt, troops)
-    game.bot.plan = None
     return game.move_fortify_pass(query)
 
 
