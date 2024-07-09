@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '11.0.4'
+VERSION = '11.0.5'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -470,12 +470,13 @@ class Bot:
         plan_list = []
         my_troops = self.sum_up_troops(self.border_territories) - len(self.border_territories)
         for pid in target_list:
+            write_log(self.clock, 'Debug Kill', f"[basic check] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {self.state.players[pid].troops_remaining}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
+
             if not self.state.players[pid].alive:
                 continue
             troops_edge = my_troops - self.state.players[pid].troops_remaining - len(self.territories[pid])
             if troops_edge < 5:
                 continue
-
             plan = {
                 'code':3, 
                 'name':None,
@@ -522,7 +523,7 @@ class Bot:
                     {
                         'src':[path[0]],
                         "tgt":path[1:],
-                        "enemy_troops":troops_diff + self.state.territories[src].troops - 1,
+                        "enemy_troops":troops_diff + self.state.territories[src].troops + 1,
                         "my_troops":self.state.territories[src].troops,
                         "from": path[0],
                         "to": path[1],
@@ -530,6 +531,7 @@ class Bot:
                                 }
                 )
             chosen_path = min(paths, key=lambda x:x['enemy_troops'])
+            write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
             for tid in chosen_path['target']:
                 chosen_path["enemy_troops"] += self.state.territories[tid].troops
             my_active_troops = assignable_troops + chosen_path['my_troops'] - 1
@@ -546,7 +548,7 @@ class Bot:
             srcs = a_or_b(srcs, new_added_terrs)
             enemy_territories = a_minus_b(enemy_territories, srcs)
             srcs = self.state.get_all_adjacent_territories(enemy_territories)
-        
+        write_log(self.clock, 'Debug Kill', f"final group {groups}")
         return groups
         
     def interupt_opponunt_continent(self):
