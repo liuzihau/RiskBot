@@ -471,7 +471,6 @@ class Bot:
         my_troops = self.sum_up_troops(self.border_territories) - len(self.border_territories)
         for pid in target_list:
             write_log(self.clock, 'Debug Kill', f"[basic check] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {self.state.players[pid].troops_remaining}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
-
             if not self.state.players[pid].alive:
                 continue
             troops_edge = my_troops - self.state.players[pid].troops_remaining - len(self.territories[pid])
@@ -531,7 +530,7 @@ class Bot:
                         "target":target
                                 }
                 )
-            chosen_path = min(paths, key=lambda x:x['my_troops'] - x['enemy_troops'])
+            chosen_path = max(paths, key=lambda x:x['my_troops'] - x['enemy_troops'])
             write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
             for tid in chosen_path['target']:
                 chosen_path["enemy_troops"] += self.state.territories[tid].troops
