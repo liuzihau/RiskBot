@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.1'
+VERSION = '12.0.2'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
