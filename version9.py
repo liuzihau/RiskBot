@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '9.06'
+VERSION = '9.0.7'
 DEBUG = True
 
 CONTINENT = {
@@ -200,22 +200,25 @@ class Bot:
         
     def plan_to_do(self, attack_phase=False):
         """
-        plan_dict
-        {
-                        "code": 0,
-                        "name": name,
-                        "from": pair[0],
-                        "to": pair[1],
-                        "cost":cost,
-                        "diff":diff,
-                        "reward": REWARD[name],
-                        ### for occupy ###
-                        "src":[],
-                        "tgt":[]
-                        ### for kill ###
-                        "route":killing_path,
-                        "pid":player_id
+        plan
+                    {
+                    'code': 0, 
+                    'name': 'NA', 
+                    'reward': 5, 
+                    'groups': [
+                        {'src': [8, 3], 
+                        'tgt': [2], 
+                        'enemy_troops': 1, 
+                        'assign_troops': 0, 
+                        'from': 8, 
+                        'to': 2
                         }
+                        ], 
+                    'cost': 2, 
+                    'diff': 8, 
+                    'my_territories': [8, 3], 
+                    'border_territories': [8, 3]
+                    }
         """
 
         if self.plan is None:
@@ -314,8 +317,27 @@ class Bot:
         self.plan = None
 
     def update_plan(self):
-        if self.plan is not None and self.plan['code'] == 0:
+        if self.plan is None:
+            return
+        
+        if self.plan['code'] == 0:
             self.plan = self.find_good_attack_source_and_target(self.plan)
+        
+        if not self.valid_attack():
+            self.plan = None
+
+    def valid_attack(self):
+        if self.plan is None:
+            return False
+        if self.plan['code'] == 0:
+            src = self.plan['groups'][0]['from']
+            tgt = self.plan['groups'][0]['to']
+        else:
+            src = self.plan['from']
+            tgt = self.plan['to']
+        if self.state.territories[src].troops > self.state.territories[tgt].troops:
+            return True
+        return False
 
 
     def choose_territory_minimuize_border(self, terr_set, effective_border, name=None):
@@ -780,12 +802,19 @@ class Bot:
     def put_troops_on_attack_territory(self, src, tgt, max_troops, min_troops):
         if self.plan is None:
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
-        potential_border = DOOR[self.plan["name"]]
-        idle_troops = self.plan["diff"] - DIFF[self.plan["code"]]
+        potential_border = []
+        groups = self.get_sorted_connected_group(a_or_b(CONTINENT[self.plan["name"]], self.territories[self.id_me]))
+        for group in groups:
+            if len(a_and_b(group, CONTINENT[self.plan["name"]])) == len(CONTINENT[self.plan["name"]]):
+                potential_border = self.state.get_all_border_territories(group)
+        potential_border = a_and_b(potential_border, DOOR[self.plan["name"]])
+
         if src in potential_border:
-            ideal_defend_troops = idle_troops // len(potential_border)
-            final_troops = max(min_troops, min(max_troops - 1, ideal_defend_troops))
-            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is door, put {final_troops} for protecting")
+            enemy_group = a_minus_b(self.plan['groups'][0]['tgt'], [tgt])
+            idle_troops = max_troops - self.sum_up_troops(enemy_group) - len(enemy_group) - 5
+            ideal_defend_troops = max(1, idle_troops // len(potential_border))
+            final_troops = max(min_troops, max_troops - ideal_defend_troops)
+            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is door, put {max_troops - final_troops} for protecting")
             return final_troops
         else:
             write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is not door, put 1")
@@ -1074,7 +1103,11 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
     game.bot.update_status()
-    game.bot.update_plan()
+    last_record = cast(RecordAttack, game.state.recording)[-1]
+    if last_record.record_type == 'move_troops_after_attack':
+        game.bot.plan_to_do()
+    else:
+        game.bot.update_plan()
     write_log(game.bot.clock, 'Attack', f"plan: {game.bot.plan}")
     information = game.bot.attack_by_plan()
     if information is not None:
@@ -1087,6 +1120,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     """
     After conquering a territory in an attack, you must move troops to the new territory.
     """
+
     survival_players = 0
     for pid in game.bot.ids_others:
         if game.state.players[pid].alive:
@@ -1094,13 +1128,8 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     if survival_players > 3 or game.bot.clock < 3000:
         game.bot.got_territoty_this_turn = True
     game.bot.update_status()
-    game.bot.plan_to_do()
-    
-    # First we need to get the record that describes the attack, and then the move that specifies
-    # which territory was the attacking territory.
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
-
     moving_troops = game.bot.moving_troops_based_on_plan_code(record_attack, move_attack)
     return game.move_troops_after_attack(query, moving_troops)
 
