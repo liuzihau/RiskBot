@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '10.0.4'
+VERSION = '10.0.5'
 DEBUG = True
 
 CONTINENT = {
@@ -393,7 +393,7 @@ class Bot:
                         attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
                         diff = attack_troops - group['enemy_troops']
                         if diff < K:
-                            assigned_troops = min((K-diff), assignable_troops)
+                            assigned_troops = min((K-diff+1), assignable_troops)
                         else:
                             assigned_troops = 0
                         if diff + assigned_troops >= K:
@@ -764,6 +764,18 @@ class Bot:
                 write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {self.plan['from']}")
         return total_troops, distributions
 
+    def distribute_troops_to_connected_border(self, total_troops, distributions):
+        groups = self.get_sorted_connected_group(self.territories[self.id_me])
+        borders = self.state.get_all_border_territories(groups[0])
+        borders = sorted(borders, key=lambda x:self.state.territories[x].troops)
+        while total_troops > 0:
+            for border in borders:
+                distributions[border] += 1
+                total_troops -= 1
+                if total_troops == 0:
+                    break
+        return total_troops, distributions
+    
     # Attack
     def attack_by_plan(self):
         if self.plan:
@@ -1094,21 +1106,10 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
 
     # step 1 distribute remain troops in effective border
     # We will distribute troops across our border territories.
-    border_territories = game.state.get_all_border_territories(
-        game.state.get_territories_owned_by(game.state.me.player_id)
-    )
-
     # We will equally distribute across border territories in the early game,
     # but start doomstacking in the late game.
     if len(game.state.recording) < 4000:
-        troops_per_territory = total_troops // len(border_territories)
-        leftover_troops = total_troops % len(border_territories)
-        for territory in border_territories:
-            distributions[territory] += troops_per_territory
-    
-        # The leftover troops will be put some territory (we don't care)
-        distributions[border_territories[0]] += leftover_troops
-    
+        total_troops, distributions = game.bot.distribute_troops_to_connected_border(total_troops, distributions)
     else:
         my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
         weakest_players = sorted(game.state.players.values(), key=lambda x: sum(
