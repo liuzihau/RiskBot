@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '10.0.1'
+VERSION = '10.0.2'
 DEBUG = True
 
 CONTINENT = {
@@ -369,7 +369,7 @@ class Bot:
     def find_good_attack_source_and_target(self, plan):
         K = 1
         assignable_troops = self.state.me.troops_remaining
-        if plan['diff'] + assignable_troops < 3:
+        if plan['diff'] + assignable_troops < 1:
             return
         distributions = defaultdict(lambda: 0)
         for group in plan['groups']:
@@ -1077,6 +1077,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # step 0
     # game.bot.previous_territories = game.bot.territories[game.bot.id_me]
     game.bot.update_status()
+    game.bot.plan = None
     game.bot.plan_to_do()
     write_log(game.bot.clock, "Distribute", f"follow plan {game.bot.plan}")
     total_troops, distributions = game.bot.distribute_troops_by_plan(total_troops, distributions)
@@ -1179,8 +1180,6 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     any two of your territories (they must be adjacent)."""
 
     game.bot.update_status()
-    game.bot.plan = None
-
     game.bot.got_territoty_this_turn = False
     information = game.bot.fortify_troops()
     if information is not None:
