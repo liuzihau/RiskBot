@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '11.0.3'
+VERSION = '11.0.4'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -143,8 +143,8 @@ def dijkstra(state, src: int, targets: list, enemy_territories) -> tuple:
     previous_vertices = {src:None}
 
     # Set the distance for start vertices
-    distances[src] = 0
-    heapq.heappush(pq, (0, src))
+    distances[src] = -state.territories[src].troops - 1
+    heapq.heappush(pq, (-state.territories[src].troops - 1, src))
 
     while pq:
         current_distance, current_vertex = heapq.heappop(pq)
@@ -222,7 +222,7 @@ class Bot:
         """
         tried_kill = False
         if self.plan is not None and self.plan['code'] == 3:
-            kill_plan_list = self.kill_player()
+            kill_plan_list = self.kill_player(self.plan['pid'])
             tried_kill = True
             if kill_plan_list is not None:
                 self.plan = kill_plan_list[0]
@@ -261,7 +261,7 @@ class Bot:
                 return
 
         elif occupy_plan_list is not None:
-            if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 2:
+            if occupy_plan_list[0]['diff'] + self.state.me.troops_remaining > 1:
                 self.plan = occupy_plan_list[0]
                 return
 
@@ -369,9 +369,11 @@ class Bot:
                     cands = a_and_b(group['src'], self.state.map.get_adjacent_to(tgt))
                     if not cands:
                         continue
+                    
                     # try inner first
                     inner_cands = a_minus_b(cands, self.border_territories)
                     outer_cands = a_minus_b(cands, inner_cands)
+
                     if inner_cands:
                         max_cand = max(cands, key=lambda x: self.state.territories[x].troops-distributions[x])
                         attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
@@ -392,6 +394,7 @@ class Bot:
                             group['from'] = max_cand
                             group['to'] = tgt
                             break
+
                     if outer_cands:
                         max_cand = max(outer_cands, key=lambda x: self.state.territories[x].troops-distributions[x])
                         attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
@@ -462,20 +465,21 @@ class Bot:
             return plan_list
         return
     
-    def kill_player(self):
+    def kill_player(self, target=None):
+        target_list = [target] if target is not None else self.ids_others
         plan_list = []
         my_troops = self.sum_up_troops(self.border_territories) - len(self.border_territories)
-        for pid in self.ids_others:
-            
+        for pid in target_list:
             if not self.state.players[pid].alive:
                 continue
             troops_edge = my_troops - self.state.players[pid].troops_remaining - len(self.territories[pid])
-            if troops_edge < 10:
+            if troops_edge < 5:
                 continue
 
             plan = {
                 'code':3, 
                 'name':None,
+                'pid': pid,
                 'reward': (self.state.card_sets_redeemed - 3) * self.state.players[pid].card_count * 1.5,
                 'groups':[],
                 'my_territories': self.territories[self.id_me], 
@@ -511,14 +515,14 @@ class Bot:
         while len(targets) > 0:
             paths = []
             for src in srcs:
-                path, enemy_troops, target = dijkstra(self.state, src, targets, enemy_territories)
+                path, troops_diff, target = dijkstra(self.state, src, targets, enemy_territories)
                 if path is None:
                     continue
                 paths.append(
                     {
                         'src':[path[0]],
                         "tgt":path[1:],
-                        "enemy_troops":enemy_troops,
+                        "enemy_troops":troops_diff + self.state.territories[src].troops - 1,
                         "my_troops":self.state.territories[src].troops,
                         "from": path[0],
                         "to": path[1],
@@ -724,7 +728,7 @@ class Bot:
                 if group['from'] not in self.territories[self.id_me]:
                     while group['from'] not in self.territories[self.id_me]:
                         for g in self.plan["groups"]:
-                            if group['from'] in g['tgt']:
+                            if group['from'] in g['tgt']+g['target']:
                                 group = g
                 if group['assign_troops'] == 0:
                     continue
@@ -738,13 +742,12 @@ class Bot:
                     if group['from'] not in self.territories[self.id_me]:
                         while group['from'] not in self.territories[self.id_me]:
                             for g in self.plan["groups"]:
-                                if group['from'] in g['tgt']:
+                                if group['from'] in g['tgt']+g['target']:
                                     group = g
                     heapq.heappush(pq, (group['my_troops'], group['from']))
                 while total_troops > 0:
                     troops, gid = heapq.heappop(pq)
                     distributions[gid] += 1
-                    print(f'push back {troops+1}, {gid}')
                     heapq.heappush(pq, (troops+1, gid))
                     total_troops -= 1
                     if total_troops == 0:
@@ -805,7 +808,7 @@ class Bot:
         elif self.plan["code"] == 1:
             write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
-        elif self.plan["code"] == 2:
+        elif self.plan["code"] == 3:
             write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         elif self.plan["code"] in [2, 4, 5]:
