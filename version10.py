@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '10.0.5'
+VERSION = '10.0.7'
 DEBUG = True
 
 CONTINENT = {
@@ -42,7 +42,7 @@ CONTINENT = {
 PREFER = {
     "AU": 0.05,
     "SA": 0.04,
-    "NA": 0.04,
+    "NA": 0.03,
     "AF": 0.01,
     "EU": -0.4,
     "AS": -0.6
@@ -255,19 +255,17 @@ class Bot:
             terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
             expension_plan_list = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
             if expension_plan_list is not None:
-                if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
-                    self.plan = expension_plan_list[0]
-                    return 
+                self.plan = expension_plan_list[0]
+                return 
         
         groups = self.get_sorted_connected_group(self.territories[self.id_me])
         largest_group = groups[0]
         if len(largest_group) > 2:
-            border = list(set(self.border_territories) & set(largest_group))
+            border = a_and_b(self.border_territories, largest_group)
             expension_plan_list = self.choose_territory_minimuize_border(largest_group, border)
             if expension_plan_list is not None:
-                if expension_plan_list[0]['diff'] + self.state.me.troops_remaining > 2 and expension_plan_list[0]['border_decrease'] > -2:
-                    self.plan = expension_plan_list[0]
-                    return 
+                self.plan = expension_plan_list[0]
+                return 
         
     
         minimum_attack_list = self.minimum_attack()
@@ -326,7 +324,12 @@ class Bot:
 
     def choose_territory_minimuize_border(self, terr_set, effective_border, name=None):
         if self.got_territoty_this_turn:
-            return
+            diff_criteria = 3
+            border_criteria = -1
+        else:
+            diff_criteria = 2
+            border_criteria = -2
+            
         origin_border = self.state.get_all_border_territories(terr_set)
         plan_list = []
         for src in effective_border:
@@ -336,17 +339,21 @@ class Bot:
                 border_decrease_count = len(origin_border) - len(new_border)
                 cost = self.state.territories[tgt].troops
                 diff = self.state.territories[src].troops - cost - 1
-                plan_list.append(
-                    {
-                        "code":4 if name is not None else 5,
-                        "name":name,
-                        "from":src,
-                        "to":tgt,
-                        "cost":cost,
-                        "diff":diff,
-                        "border_decrease":border_decrease_count
-                    }
-                )
+                condition1 = diff + self.state.me.troops_remaining > diff_criteria
+                condition2 = border_decrease_count > border_criteria
+                condition3 = cost == 1 and diff > diff_criteria + 1
+                if (condition1 and condition2) or condition3:
+                    plan_list.append(
+                        {
+                            "code":4 if name is not None else 5,
+                            "name":name,
+                            "from":src,
+                            "to":tgt,
+                            "cost":cost,
+                            "diff":diff,
+                            "border_decrease":border_decrease_count
+                        }
+                    )
             if len(plan_list) > 0:
                 plan_list = sorted(plan_list, key=lambda x:x['diff'] + x["border_decrease"]*2, reverse=True)
                 return plan_list
@@ -767,13 +774,16 @@ class Bot:
     def distribute_troops_to_connected_border(self, total_troops, distributions):
         groups = self.get_sorted_connected_group(self.territories[self.id_me])
         borders = self.state.get_all_border_territories(groups[0])
-        borders = sorted(borders, key=lambda x:self.state.territories[x].troops)
+        pq = []
+        for border in borders:
+            heapq.heappush(pq, (self.state.territories[border].troops, border))
         while total_troops > 0:
-            for border in borders:
-                distributions[border] += 1
-                total_troops -= 1
-                if total_troops == 0:
-                    break
+            troops, border = heapq.heappop(pq)
+            distributions[border] += 1
+            heapq.heappush(pq, (troops+1, border))
+            total_troops -= 1
+            if total_troops == 0:
+                break
         return total_troops, distributions
     
     # Attack
@@ -1142,6 +1152,8 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
         game.bot.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
         game.bot.update_plan()
+        if game.bot.plan is None and not game.bot.got_territoty_this_turn:
+            game.bot.plan_to_do()
     write_log(game.bot.clock, 'Attack', f"plan: {game.bot.plan}")
     information = game.bot.attack_by_plan()
     if information is not None:
