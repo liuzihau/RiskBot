@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '11.0.1'
+VERSION = '11.0.2'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -229,7 +229,6 @@ class Bot:
         ###### debug #######
         if kill_plan_list is not None:
             self.plan = kill_plan_list[0]
-            print(f"[Kill] {self.plan}", flush=True)
             return
         
         if kill_plan_list is not None and occupy_plan_list is not None:
@@ -380,6 +379,7 @@ class Bot:
                             group['assign_troops'] += assigned_troops
                             assignable_troops -= assigned_troops
                             distributions[max_cand] += (attack_troops + assigned_troops)
+                            group['my_troops'] = self.state.territories[max_cand].troops
                             group['from'] = max_cand
                             group['to'] = tgt
                             break
@@ -402,6 +402,7 @@ class Bot:
                         group['assign_troops'] += assigned_troops
                         assignable_troops -= assigned_troops
                         distributions[max_cand] += (attack_troops + assigned_troops)
+                        group['my_troops'] = self.state.territories[max_cand].troops
                         group['from'] = max_cand
                         group['to'] = tgt
                         break
@@ -721,6 +722,22 @@ class Bot:
                 distributions[group["from"]] += distributed_troops
                 total_troops -= distributed_troops
                 write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
+            if self.plan['code'] in [0, 3] and total_troops > 0:
+                pq = []
+                for group in self.plan['groups']:
+                    if group['from'] not in self.territories[self.id_me]:
+                        while group['from'] not in self.territories[self.id_me]:
+                            for g in self.plan["groups"]:
+                                if group['from'] in g['tgt']:
+                                    group = g
+                    heapq.heappush(pq, (group['my_troops'], group))
+                while total_troops > 0:
+                    troops, group = heapq.heappop(pq)
+                    distributions[group['from']] += 1
+                    heapq.heappush(pq, (troops+1, group))
+                    total_troops -= 1
+                    if total_troops == 0:
+                        break                
         return total_troops, distributions
 
     def distribute_troops_to_connected_border(self, total_troops, distributions):
