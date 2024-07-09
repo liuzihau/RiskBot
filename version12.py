@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.0'
+VERSION = '12.0.1'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -136,15 +136,15 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
     path.append(current)
     return path[::-1]
 
-def dijkstra(state, src: int, targets: list, enemy_territories) -> tuple:
+def dijkstra(state, src: int, targets: list, enemy_territories, allocated_troops) -> tuple:
     # Initialize the priority queue
     pq = []
     distances = {vertex: float('infinity') for vertex in enemy_territories}
     previous_vertices = {src:None}
 
     # Set the distance for start vertices
-    distances[src] = -state.territories[src].troops - 1
-    heapq.heappush(pq, (-state.territories[src].troops - 1, src))
+    distances[src] = -state.territories[src].troops - allocated_troops[src] - 1
+    heapq.heappush(pq, (-state.territories[src].troops - allocated_troops[src] - 1, src))
 
     while pq:
         current_distance, current_vertex = heapq.heappop(pq)
@@ -513,10 +513,11 @@ class Bot:
         criteria = 4
         groups = []
         assignable_troops = self.state.me.troops_remaining
+        allocated_troops = defaultdict(lambda: 0)
         while len(targets) > 0:
             paths = []
             for src in srcs:
-                path, troops_diff, target = dijkstra(self.state, src, targets, enemy_territories)
+                path, troops_diff, target = dijkstra(self.state, src, targets, enemy_territories, allocated_troops)
                 if path is None:
                     continue
                 paths.append(
@@ -530,16 +531,17 @@ class Bot:
                         "target":target
                                 }
                 )
-            chosen_path = min(paths, key=lambda x:x['enemy_troops'])
+            chosen_path = min(paths, key=lambda x:x['my_troops'] - x['enemy_troops'])
             write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
             for tid in chosen_path['target']:
                 chosen_path["enemy_troops"] += self.state.territories[tid].troops
-            my_active_troops = assignable_troops + chosen_path['my_troops'] - 1
+            my_active_troops = assignable_troops + chosen_path['my_troops'] - allocated_troops[chosen_path['from']] - 1
             minimum_needed_troops = chosen_path['enemy_troops'] + len(chosen_path['tgt'])
             if my_active_troops - minimum_needed_troops <= criteria:
                 groups = None
                 break
             chosen_path['assign_troops'] = max(0, (criteria + minimum_needed_troops + 1 - chosen_path['my_troops']))
+            allocated_troops[chosen_path['from']] += minimum_needed_troops + criteria
             assignable_troops -= chosen_path['assign_troops']
             groups.append(chosen_path)
 
@@ -811,12 +813,31 @@ class Bot:
             write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         elif self.plan["code"] == 3:
+            return self.put_troops_on_target_greedy(src_territory, tgt_territory, max_troops, min_troops)
             write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
             return max_troops - 1
         elif self.plan["code"] in [2, 4, 5]:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
         else:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
+
+    def put_troops_on_target_greedy(self, src, tgt, max_troops, min_troops):
+        target_enemy = 0
+        other_enemy = 0
+        for group in self.plan['groups']:
+            if group['from'] == src and group['to'] == tgt:
+                enemy_territories = a_minus_b(group['tgt'], [tgt]) + group['target']
+                target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+            elif group['from'] == src:
+                enemy_territories = group['tgt'] + group['target']
+                other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+        if other_enemy == 0:
+            return max_troops - 1
+        idle_troops = max_troops - target_enemy - other_enemy - 1
+        if idle_troops > 0:
+            return max(min_troops, idle_troops // 2 - 1)
+        else:
+            return self.put_troops_on_border(src, tgt, max_troops, min_troops)
 
 
     def put_troops_on_border(self, src, tgt, max_troops, min_troops):
