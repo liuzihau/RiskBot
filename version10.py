@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '10.0.3'
+VERSION = '10.0.4'
 DEBUG = True
 
 CONTINENT = {
@@ -454,7 +454,7 @@ class Bot:
                 continue
             enemy_troops = self.sum_up_troops(enemy_territories)
             my_troops = self.sum_up_troops(ttl_border_territories)
-            cost = enemy_troops + len(enemy_territories)
+            cost = enemy_troops + len(enemy_territories) - 1 # the last one doesn't count
             diff = my_troops - cost - len(ttl_border_territories)
             plan['cost'] = cost
             plan['diff'] = diff
@@ -810,10 +810,12 @@ class Bot:
         if self.plan is None:
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
         potential_border = []
-        groups = self.get_sorted_connected_group(a_or_b(CONTINENT[self.plan["name"]], self.territories[self.id_me]))
+        my_terr_plus_continent = a_or_b(CONTINENT[self.plan["name"]], self.territories[self.id_me])
+        groups = self.get_sorted_connected_group(my_terr_plus_continent)
         for group in groups:
             if len(a_and_b(group, CONTINENT[self.plan["name"]])) == len(CONTINENT[self.plan["name"]]):
                 potential_border = self.state.get_all_border_territories(group)
+                break
 
         if src in potential_border:
             enemy_group = a_minus_b(self.plan['groups'][0]['tgt'], [tgt])
@@ -830,7 +832,7 @@ class Bot:
             write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is door, put {max_troops - final_troops} for protecting")
             return final_troops
         else:
-            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is not door, put 1")
+            write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is not door, put 1 (potential border:{potential_border})")
             return max_troops - 1
 
     # Fortify
