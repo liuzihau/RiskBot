@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '10.0.2'
+VERSION = '10.0.3'
 DEBUG = True
 
 CONTINENT = {
@@ -814,11 +814,17 @@ class Bot:
         for group in groups:
             if len(a_and_b(group, CONTINENT[self.plan["name"]])) == len(CONTINENT[self.plan["name"]]):
                 potential_border = self.state.get_all_border_territories(group)
-        # potential_border = a_and_b(potential_border, DOOR[self.plan["name"]])
 
         if src in potential_border:
             enemy_group = a_minus_b(self.plan['groups'][0]['tgt'], [tgt])
-            idle_troops = max_troops - self.sum_up_troops(enemy_group) - len(enemy_group) - 2
+            friend_group = a_minus_b(self.plan['groups'][0]['src'], [src])
+            friend_borders = []
+            for g in enemy_group:
+                adj = a_and_b(self.state.map.get_adjacent_to(g), friend_group)
+                friend_borders = a_and_b(friend_borders, adj)
+            friend_troops = self.sum_up_troops(friend_borders)
+            effective_troops = (friend_troops - len(friend_group)) // 2
+            idle_troops = max_troops - self.sum_up_troops(enemy_group) - len(enemy_group) + effective_troops
             ideal_defend_troops = max(1, idle_troops // len(potential_border))
             final_troops = max(min_troops, max_troops - ideal_defend_troops)
             write_log(self.clock, "AfterAttack", f"trying occupy {self.plan['name']}, and {src} is door, put {max_troops - final_troops} for protecting")
