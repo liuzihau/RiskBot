@@ -509,7 +509,7 @@ class Bot:
         return self.find_shortest_cost_from_group_to_group(self.border_territories, target_groups, enemy_territories)
 
     def find_shortest_cost_from_group_to_group(self, srcs: list, targets: list, enemy_territories) -> Union[list[int], None]:
-        criteria = 4
+        criteria = 3
         groups = []
         assignable_troops = self.state.me.troops_remaining
         allocated_troops = defaultdict(lambda: 0)
@@ -530,9 +530,7 @@ class Bot:
                         "target":target
                                 }
                 )
-            chosen_paths = sorted(paths, key=lambda x:x['my_troops'] - x['enemy_troops'], reverse=True)
-            # 1st try
-            chosen_paths = sorted(paths, key=lambda x:len(x['tgt']))
+            chosen_paths = sorted(paths, key=lambda x:(len(x['tgt']), x['enemy_troops'] - x['my_troops']))
             chosen_path = None
             while len(chosen_paths) > 0:
                 cand = chosen_paths.pop(0)
