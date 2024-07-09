@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '11.0.2'
+VERSION = '11.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -220,10 +220,19 @@ class Bot:
                     'border_territories': [8, 3]
                     }
         """
-            
+        tried_kill = False
+        if self.plan is not None and self.plan['code'] == 3:
+            kill_plan_list = self.kill_player()
+            tried_kill = True
+            if kill_plan_list is not None:
+                self.plan = kill_plan_list[0]
+                return
+        
+        self.plan = None
+
         # aggressive move
         occupy_plan_list = self.occupy_new_continent()
-        kill_plan_list = None if self.state.card_sets_redeemed < 6 else self.kill_player()
+        kill_plan_list = None if self.state.card_sets_redeemed < 6 or tried_kill else self.kill_player()
         interupt_plan_list = self.interupt_opponunt_continent() #TODO
         
         ###### debug #######
@@ -582,7 +591,7 @@ class Bot:
 
     # Claim Territories
     def choose_adjacent_with_info(self, info):
-        territories = list(set(self.adjacent_territories) & set(info))
+        territories = a_and_b(self.adjacent_territories, info)
         if territories:
             return territories[0]
         return info[0]
@@ -644,7 +653,7 @@ class Bot:
     
     def check_continent_availibility(self):
         pr_list = []
-        for name in ['AU', 'SA', 'AF', 'NA']:
+        for name in ['AU', 'SA', 'AF', 'NA', 'EU']:
             my_troops = self.my_troops_in_continent(name)
             enemy_troops = self.enemy_troops_in_continent(name)
             if my_troops < enemy_troops:
@@ -717,12 +726,13 @@ class Bot:
                         for g in self.plan["groups"]:
                             if group['from'] in g['tgt']:
                                 group = g
-                need_troops = group['assign_troops']
-                distributed_troops = min(total_troops, need_troops)
+                if group['assign_troops'] == 0:
+                    continue
+                distributed_troops = min(total_troops, group['assign_troops'])
                 distributions[group["from"]] += distributed_troops
                 total_troops -= distributed_troops
                 write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
-            if self.plan['code'] in [0, 3] and total_troops > 0:
+            if self.plan['code'] == 3 and total_troops > 0:
                 pq = []
                 for group in self.plan['groups']:
                     if group['from'] not in self.territories[self.id_me]:
@@ -730,11 +740,12 @@ class Bot:
                             for g in self.plan["groups"]:
                                 if group['from'] in g['tgt']:
                                     group = g
-                    heapq.heappush(pq, (group['my_troops'], group))
+                    heapq.heappush(pq, (group['my_troops'], group['from']))
                 while total_troops > 0:
-                    troops, group = heapq.heappop(pq)
-                    distributions[group['from']] += 1
-                    heapq.heappush(pq, (troops+1, group))
+                    troops, gid = heapq.heappop(pq)
+                    distributions[gid] += 1
+                    print(f'push back {troops+1}, {gid}')
+                    heapq.heappush(pq, (troops+1, gid))
                     total_troops -= 1
                     if total_troops == 0:
                         break                
@@ -1096,7 +1107,6 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # step 0
     # game.bot.previous_territories = game.bot.territories[game.bot.id_me]
     game.bot.update_status()
-    game.bot.plan = None
     game.bot.plan_to_do()
     write_log(game.bot.clock, "Distribute", f"follow plan {game.bot.plan}")
     total_troops, distributions = game.bot.distribute_troops_by_plan(total_troops, distributions)
@@ -1137,7 +1147,6 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     game.bot.update_status()
     last_record = cast(RecordAttack, game.state.recording)[-1]
     if last_record.record_type == 'move_troops_after_attack':
-        game.bot.plan = None
         game.bot.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
         game.bot.update_plan()
@@ -1155,23 +1164,9 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     """
     After conquering a territory in an attack, you must move troops to the new territory.
     """
-
-    survival_players = 0
-    for pid in game.bot.ids_others:
-        if game.state.players[pid].alive:
-            survival_players += 1
-    if survival_players > 3 or game.bot.clock < 3000:
-        game.bot.got_territoty_this_turn = True
+    game.bot.got_territoty_this_turn = True
     game.bot.update_status()
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
-    # if game.bot.clock > 2000:
-    #     for record in game.state.recording:
-    #         if record.record_type == 'move_redeem_cards':
-    #             print(record, flush=True)
-    #     print(game.state.card_sets_redeemed, flush=True)
-    #     raise
-
-
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
     moving_troops = game.bot.moving_troops_based_on_plan_code(record_attack, move_attack)
     return game.move_troops_after_attack(query, moving_troops)
