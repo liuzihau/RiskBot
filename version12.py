@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.8'
+VERSION = '12.0.9'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -138,10 +138,9 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
     return path[::-1]
 
 
-class Bot:
-    def __init__(self, state, log):
+class BotState:
+    def __init__(self, state):
         self.state = state
-        self.log = log
         self.id_me = None
         self.ids_others = []
         self.territories = {}
@@ -972,6 +971,7 @@ class Bot:
     def find_strongest_territories(self, weakest_territories, group):
         # first we check the largest troops we can use in the inner territories
         # second we check the maximum trrops we can use in the border territories
+
         # if split half the border the troops still safe and larger than inner troops than use border
         # use inner
         weakest_troops = self.state.territories[weakest_territories[0]].troops
@@ -1000,9 +1000,9 @@ class Bot:
 
         
 # We will store our enemy in the bot state.
-class BotState():
-    def __init__(self):
-        self.enemy: Optional[int] = None
+# class BotState():
+#     def __init__(self):
+#         self.enemy: Optional[int] = None
 
 
 def main():
@@ -1010,10 +1010,7 @@ def main():
     # Get the game object, which will connect you to the engine and
     # track the state of the game.
     game = Game()
-    game.log = './log.txt'
-    bot_state = BotState()
-    bot = Bot(game.state, game.log) 
-    game.bot = bot
+    bot_state = BotState(game.state) 
     write_log("-1","Version", f"{VERSION}")
 
     # Respond to the engine's queries with your moves.
@@ -1022,7 +1019,7 @@ def main():
         # Get the engine's query (this will block until you receive a query).
         query = game.get_next_query()
         
-        game.bot.clock = list(query.update.keys())[0]
+        bot_state.clock = list(query.update.keys())[0]
 
         # Based on the type of query, respond with the correct move.
         def choose_move(query: QueryType) -> MoveType:
@@ -1062,36 +1059,36 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
     """
 
     # step 0 update status
-    game.bot.update_status()
+    bot_state.update_status()
 
     # step 1 Blocking other player occupied whole continentcheck if other player have the chance to dominent one specific continent
-    territory = game.bot.block_players()
+    territory = bot_state.block_players()
     if territory:
-        write_log(game.bot.clock, "Claim", f"decided by block, {territory}")
+        write_log(bot_state.clock, "Claim", f"decided by block, {territory}")
         return game.move_claim_territory(query, territory)
 
     # step 2 check if we can dominent one specific continent
-    territories = game.bot.search_preferred_continent()
+    territories = bot_state.search_preferred_continent()
     if territories:
-        territory = game.bot.choose_adjacent_with_info(territories)
-        write_log(game.bot.clock, "Claim", f"decided by collect continent, {territory}")
+        territory = bot_state.choose_adjacent_with_info(territories)
+        write_log(bot_state.clock, "Claim", f"decided by collect continent, {territory}")
         return game.move_claim_territory(query, territory)
     
     # step 3 try to maximise the adjacent territory
-    sorted_group = game.bot.get_sorted_connected_group(game.bot.territories[game.bot.id_me])
-    territory = game.bot.try_to_connect_territory_no_gap(sorted_group)
+    sorted_group = bot_state.get_sorted_connected_group(bot_state.territories[bot_state.id_me])
+    territory = bot_state.try_to_connect_territory_no_gap(sorted_group)
     if territory:
-        write_log(game.bot.clock, "Claim", f"decided by connect with possible largest territories, {territory}")
+        write_log(bot_state.clock, "Claim", f"decided by connect with possible largest territories, {territory}")
         return game.move_claim_territory(query, territory)
     
-    territory = game.bot.try_to_connect_territory_1_gap(sorted_group)
+    territory = bot_state.try_to_connect_territory_1_gap(sorted_group)
     if territory:
-        write_log(game.bot.clock, "Claim", f"decided by 1 gap with possible largest territories, {territory}")
+        write_log(bot_state.clock, "Claim", f"decided by 1 gap with possible largest territories, {territory}")
         return game.move_claim_territory(query, territory)
     
     # step 4 pick by degree
-    territory = game.bot.pick_by_degree()
-    write_log(game.bot.clock, "Claim", f"decided by degree, {territory}")
+    territory = bot_state.pick_by_degree()
+    write_log(bot_state.clock, "Claim", f"decided by degree, {territory}")
     return game.move_claim_territory(query, territory)
 
 def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlaceInitialTroop) -> MovePlaceInitialTroop:
@@ -1101,19 +1098,19 @@ def handle_place_initial_troop(game: Game, bot_state: BotState, query: QueryPlac
     """
 
     # step 0 update status
-    game.bot.update_status()
+    bot_state.update_status()
 
     # senario 1: we control full continent
-    group = game.bot.check_full_control_continent()
+    group = bot_state.check_full_control_continent()
     if group:
-        territory_id = game.bot.put_troops_equally_on_border(group)
-        write_log(game.bot.clock, "Initialise", f"equally distributed troops on the border of our continent {territory_id}")
+        territory_id = bot_state.put_troops_equally_on_border(group)
+        write_log(bot_state.clock, "Initialise", f"equally distributed troops on the border of our continent {territory_id}")
         return game.move_place_initial_troop(query, territory_id)
 
     # senario 2: we have edge in a continent
-    group = game.bot.check_our_dominent_continent()
-    territory_id = game.bot.put_troops_equally_on_border(group)
-    write_log(game.bot.clock, "Initialise", f"equally distributed troops on the border of our continent {territory_id}")
+    group = bot_state.check_our_dominent_continent()
+    territory_id = bot_state.put_troops_equally_on_border(group)
+    write_log(bot_state.clock, "Initialise", f"equally distributed troops on the border of our continent {territory_id}")
     return game.move_place_initial_troop(query, territory_id)
 
 def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards) -> MoveRedeemCards:
@@ -1161,7 +1158,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # We need to remember we have to place our matching territory bonus
     # if we have one.
     if len(game.state.me.must_place_territory_bonus) != 0:
-        write_log(game.bot.clock, "Distribute", f"bonus : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}")
+        write_log(bot_state.clock, "Distribute", f"bonus : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}")
         assert total_troops >= 2
         for i in game.state.me.must_place_territory_bonus:
             if i in game.state.get_territories_owned_by(game.state.me.player_id):
@@ -1170,11 +1167,11 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
                 break
             
     # step 0
-    # game.bot.previous_territories = game.bot.territories[game.bot.id_me]
-    game.bot.update_status()
-    game.bot.plan_to_do()
-    write_log(game.bot.clock, "Distribute", f"follow plan {game.bot.plan}")
-    total_troops, distributions = game.bot.distribute_troops_by_plan(total_troops, distributions)
+    # bot_state.previous_territories = bot_state.territories[bot_state.id_me]
+    bot_state.update_status()
+    bot_state.plan_to_do()
+    write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
+    total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
     if total_troops == 0:
         return game.move_distribute_troops(query, distributions)
 
@@ -1183,10 +1180,10 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # We will equally distribute across border territories in the early game,
     # but start doomstacking in the late game.
     if len(game.state.recording) < 1000:
-        total_troops, distributions = game.bot.distribute_troops_to_connected_border(total_troops, distributions)
+        total_troops, distributions = bot_state.distribute_troops_to_connected_border(total_troops, distributions)
     else:
         # stack all my troops into one point
-        total_troops, distributions = game.bot.find_a_good_arena(total_troops, distributions)
+        total_troops, distributions = bot_state.find_a_good_arena(total_troops, distributions)
 
 
         # my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
@@ -1213,16 +1210,16 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     stop attacking (by passing). After a successful attack, you may move troops into the conquered
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
-    game.bot.update_status()
+    bot_state.update_status()
     last_record = cast(RecordAttack, game.state.recording)[-1]
     if last_record.record_type == 'move_troops_after_attack':
-        game.bot.plan_to_do()
+        bot_state.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
-        game.bot.update_plan()
-        if game.bot.plan is None and not game.bot.got_territoty_this_turn:
-            game.bot.plan_to_do()
-    write_log(game.bot.clock, 'Attack', f"plan: {game.bot.plan}")
-    information = game.bot.attack_by_plan()
+        bot_state.update_plan()
+        if bot_state.plan is None and not bot_state.got_territoty_this_turn:
+            bot_state.plan_to_do()
+    write_log(bot_state.clock, 'Attack', f"plan: {bot_state.plan}")
+    information = bot_state.attack_by_plan()
     if information is not None:
         attack_territory, target_territory, troops = information
         return game.move_attack(query, attack_territory, target_territory, troops)
@@ -1233,11 +1230,12 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     """
     After conquering a territory in an attack, you must move troops to the new territory.
     """
-    game.bot.got_territoty_this_turn = True
-    game.bot.update_status()
+    bot_state.got_territoty_this_turn = True
+    bot_state.update_status()
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
-    moving_troops = game.bot.moving_troops_based_on_plan_code(record_attack, move_attack)
+    moving_troops = bot_state.moving_troops_based_on_plan_code(record_attack, move_attack)
+
     return game.move_troops_after_attack(query, moving_troops)
 
 def handle_defend(game: Game, bot_state: BotState, query: QueryDefend) -> MoveDefend:
@@ -1261,9 +1259,9 @@ def handle_fortify(game: Game, bot_state: BotState, query: QueryFortify) -> Unio
     """At the end of your turn, after you have finished attacking, you may move a number of troops between
     any two of your territories (they must be adjacent)."""
 
-    game.bot.update_status()
-    game.bot.got_territoty_this_turn = False
-    information = game.bot.fortify_troops()
+    bot_state.update_status()
+    bot_state.got_territoty_this_turn = False
+    information = bot_state.fortify_troops()
     if information is not None:
         src, tgt, troops = information
         return game.move_fortify(query, src, tgt, troops)
