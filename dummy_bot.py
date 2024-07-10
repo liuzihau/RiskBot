@@ -27,11 +27,10 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.8'
+VERSION = 'dummy'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
-
 CONTINENT = {
     "AU": [38, 39, 41, 40],
     "SA": [28, 31, 29, 30],
@@ -53,9 +52,9 @@ PREFER = {
 DOOR = {
     "AU": [40],
     "SA": [29, 30],
-    "NA": [4, 0, 2],
     "AF": [33, 36, 34],
     "EU": [10, 15, 13, 14],
+    "NA": [4, 0, 2],
     "AS": [21, 26, 24, 22, 16]
 }
 
@@ -198,7 +197,7 @@ class Bot:
 
         # aggressive move
         occupy_plan_list = self.occupy_new_continent()
-        kill_plan_list = None if self.state.card_sets_redeemed < 3 or tried_kill else self.kill_player()
+        kill_plan_list = None if self.state.card_sets_redeemed < 4 or tried_kill else self.kill_player()
         interupt_plan_list = self.interupt_opponunt_continent() #TODO
         
         ###### debug #######
@@ -928,7 +927,7 @@ class Bot:
         srcs = self.find_strongest_territories(tgts, group)
         if len(srcs) == 0:
             return 
-        new_tgts = [tgt for tgt in tgts if self.state.territories[tgt].troops < self.state.territories[tgts[0]].troops + 2][:3]
+        new_tgts = [tgt for tgt in tgts if self.state.territories[tgt].troops == self.state.territories[tgts[0]].troops][:3]
         new_srcs = srcs[:3]
 
         moving_plan = []
