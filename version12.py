@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.5'
+VERSION = '12.0.6'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -36,7 +36,7 @@ CONTINENT = {
     "SA": [28, 31, 29, 30],
     "AF": [35, 37, 32, 33, 36, 34],
     "EU": [12, 10, 9, 15, 13, 14, 11],
-    "NA": [5, 4, 0, 1, 6, 7, 8, 3, 2],
+    "NA": [2, 3, 8, 7, 6, 1, 4, 5, 0],
     "AS": [20, 27, 21, 25, 26, 19, 23, 17, 24, 18, 22, 16]
     }
 
@@ -453,8 +453,12 @@ class Bot:
             if plan['reward'] == 0 or self.state.players[pid].card_count < 2:
                 continue
 
-            plan['groups'] = self.find_killing_path(pid)
-            if plan['groups'] is not None:
+            groups = self.find_killing_path(pid)
+            if groups is not None:
+                groups = sorted(groups, key=lambda x: x['enemy_troops'], reverse=True)
+                while groups[0]['from'] not in self.territories[self.id_me]:
+                    groups.append(groups.pop(0))
+                plan['groups'] = groups
                 total_cost = 0
                 total_diff = 0
                 for group_plan in plan['groups']:
@@ -464,6 +468,7 @@ class Bot:
                 plan['diff'] = total_diff
                 if total_diff > 2:
                     plan_list.append(plan)
+            
         if len(plan_list) > 0:
             plan_list = sorted(plan_list, key=lambda x:x['diff'], reverse=True)
             return plan_list
@@ -560,6 +565,7 @@ class Bot:
                     heapq.heappush(pq, (distance, neighbor))
 
         return None, float('infinity'), None
+    
     def interupt_opponunt_continent(self):
         pass
 
@@ -780,6 +786,15 @@ class Bot:
                 break
         return total_troops, distributions
     
+    def find_a_good_arena(self, total_troops, distributions):
+        if self.plan is not None:
+            distributions[self.plan['groups'][0]['from']] += total_troops
+            total_troops -= total_troops
+        else:
+            total_troops, distributions =  self.distribute_troops_to_connected_border(total_troops, distributions)
+
+        return total_troops, distributions
+
     # Attack
     def update_plan(self):
         if self.plan is None:
@@ -1151,23 +1166,27 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # We will distribute troops across our border territories.
     # We will equally distribute across border territories in the early game,
     # but start doomstacking in the late game.
-    if len(game.state.recording) < 4000:
+    if len(game.state.recording) < 1000:
         total_troops, distributions = game.bot.distribute_troops_to_connected_border(total_troops, distributions)
     else:
-        my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-        weakest_players = sorted(game.state.players.values(), key=lambda x: sum(
-            [game.state.territories[y].troops for y in game.state.get_territories_owned_by(x.player_id)]
-        ))
+        # stack all my troops into one point
+        total_troops, distributions = game.bot.find_a_good_arena(total_troops, distributions)
 
-        for player in weakest_players:
-            bordering_enemy_territories = set(game.state.get_all_adjacent_territories(my_territories)) & set(game.state.get_territories_owned_by(player.player_id))
-            if len(bordering_enemy_territories) > 0:
-                print("my territories", [game.state.map.get_vertex_name(x) for x in my_territories])
-                print("bordering enemies", [game.state.map.get_vertex_name(x) for x in bordering_enemy_territories])
-                print("adjacent to target", [game.state.map.get_vertex_name(x) for x in game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])])
-                selected_territory = list(set(game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])) & set(my_territories))[0]
-                distributions[selected_territory] += total_troops
-                break
+
+        # my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
+        # weakest_players = sorted(game.state.players.values(), key=lambda x: sum(
+        #     [game.state.territories[y].troops for y in game.state.get_territories_owned_by(x.player_id)]
+        # ))
+
+        # for player in weakest_players:
+        #     bordering_enemy_territories = set(game.state.get_all_adjacent_territories(my_territories)) & set(game.state.get_territories_owned_by(player.player_id))
+        #     if len(bordering_enemy_territories) > 0:
+        #         print("my territories", [game.state.map.get_vertex_name(x) for x in my_territories])
+        #         print("bordering enemies", [game.state.map.get_vertex_name(x) for x in bordering_enemy_territories])
+        #         print("adjacent to target", [game.state.map.get_vertex_name(x) for x in game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])])
+                # selected_territory = list(set(game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])) & set(my_territories))[0]
+                # distributions[selected_territory] += total_troops
+                # break
 
 
     return game.move_distribute_troops(query, distributions)
