@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.4'
+VERSION = '12.0.5'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -135,41 +135,6 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
         current = parent[current]
     path.append(current)
     return path[::-1]
-
-def dijkstra(state, src: int, targets: list, enemy_territories, allocated_troops) -> tuple:
-    # Initialize the priority queue
-    pq = []
-    distances = {vertex: float('infinity') for vertex in enemy_territories}
-    previous_vertices = {src:None}
-
-    # Set the distance for start vertices
-    distances[src] = -state.territories[src].troops - allocated_troops[src] - 1
-    heapq.heappush(pq, (-state.territories[src].troops - allocated_troops[src] - 1, src))
-
-    while pq:
-        current_distance, current_vertex = heapq.heappop(pq)
-
-        # If we reach a target vertex, we can return the path and distance
-        for target in targets:
-            if current_vertex in target:
-                path = []
-                while current_vertex is not None:
-                    path.append(current_vertex)
-                    current_vertex = previous_vertices[current_vertex]
-                return path[::-1], current_distance, target
-
-        # Process each neighbor
-        neighbors = a_and_b(state.map.get_adjacent_to(current_vertex), enemy_territories)
-
-        for neighbor in neighbors:
-            distance = current_distance + state.territories[neighbor].troops
-            # Only consider this new path if it's better
-            if distance < distances[neighbor]:
-                distances[neighbor] = distance
-                previous_vertices[neighbor] = current_vertex
-                heapq.heappush(pq, (distance, neighbor))
-
-    return None, float('infinity'), None
 
 
 class Bot:
@@ -516,7 +481,7 @@ class Bot:
         while len(targets) > 0:
             paths = []
             for src in srcs:
-                path, troops_diff, target = dijkstra(self.state, src, targets, enemy_territories, allocated_troops)
+                path, troops_diff, target = self.dijkstra(src, targets, enemy_territories, allocated_troops)
                 if path is None:
                     continue
                 paths.append(
@@ -560,6 +525,41 @@ class Bot:
         write_log(self.clock, 'Debug Kill', f"final group {groups}")
         return groups
         
+    def dijkstra(self, src: int, targets: list, enemy_territories, allocated_troops) -> tuple:
+        # Initialize the priority queue
+        pq = []
+        distances = {vertex: float('infinity') for vertex in enemy_territories}
+        previous_vertices = {src:None}
+
+        # Set the distance for start vertices
+        start_troops = self.state.territories[src].troops if src in self.territories[self.id_me] else 0
+        distances[src] = -start_troops - allocated_troops[src] - 1
+        heapq.heappush(pq, (-start_troops - allocated_troops[src] - 1, src))
+
+        while pq:
+            current_distance, current_vertex = heapq.heappop(pq)
+
+            # If we reach a target vertex, we can return the path and distance
+            for target in targets:
+                if current_vertex in target:
+                    path = []
+                    while current_vertex is not None:
+                        path.append(current_vertex)
+                        current_vertex = previous_vertices[current_vertex]
+                    return path[::-1], current_distance, target
+
+            # Process each neighbor
+            neighbors = a_and_b(self.state.map.get_adjacent_to(current_vertex), enemy_territories)
+
+            for neighbor in neighbors:
+                distance = current_distance + self.state.territories[neighbor].troops
+                # Only consider this new path if it's better
+                if distance < distances[neighbor]:
+                    distances[neighbor] = distance
+                    previous_vertices[neighbor] = current_vertex
+                    heapq.heappush(pq, (distance, neighbor))
+
+        return None, float('infinity'), None
     def interupt_opponunt_continent(self):
         pass
 
@@ -847,7 +847,6 @@ class Bot:
         else:
             write_log(self.clock, "AfterAttack", f"sharing src with other attack plan with no extra {idle_troops} troops, give up killing plan and average the troops based on border")
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
-
 
     def put_troops_on_border(self, src, tgt, max_troops, min_troops):
         if src in self.border_territories and tgt in self.border_territories:
