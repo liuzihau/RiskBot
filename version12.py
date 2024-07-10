@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '12.0.6'
+VERSION = '12.0.7'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -435,10 +435,11 @@ class Bot:
         plan_list = []
         my_troops = self.sum_up_troops(self.border_territories) - len(self.border_territories)
         for pid in target_list:
-            write_log(self.clock, 'Debug Kill', f"[basic check] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {self.state.players[pid].troops_remaining}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
+            enemy_troops = self.sum_up_troops(self.territories[pid]) - len(self.border_territories)
+            write_log(self.clock, 'Debug Kill', f"[basic check] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             if not self.state.players[pid].alive:
                 continue
-            troops_edge = my_troops - self.state.players[pid].troops_remaining - len(self.territories[pid])
+            troops_edge = my_troops - enemy_troops - len(self.territories[pid])
             if troops_edge < 5:
                 continue
             plan = {
@@ -493,7 +494,7 @@ class Bot:
                     {
                         'src':[path[0]],
                         "tgt":path[1:],
-                        "enemy_troops":troops_diff + (self.state.territories[src].troops - allocated_troops[src] - 1),
+                        "enemy_troops": troops_diff + (self.state.territories[src].troops - allocated_troops[src] - 1),
                         "my_troops":self.state.territories[src].troops,
                         "from": path[0],
                         "to": path[1],
@@ -527,6 +528,7 @@ class Bot:
             srcs = a_or_b(srcs, new_added_terrs)
             enemy_territories = a_minus_b(enemy_territories, srcs)
             srcs = self.state.get_all_adjacent_territories(enemy_territories)
+
         write_log(self.clock, 'Debug Kill', f"final group {groups}")
         return groups
         
@@ -538,8 +540,8 @@ class Bot:
 
         # Set the distance for start vertices
         start_troops = self.state.territories[src].troops if src in self.territories[self.id_me] else 0
-        distances[src] = -start_troops - allocated_troops[src] - 1
-        heapq.heappush(pq, (-start_troops - allocated_troops[src] - 1, src))
+        distances[src] = -(start_troops - allocated_troops[src] - 1)
+        heapq.heappush(pq, (-(start_troops - allocated_troops[src] - 1), src))
 
         while pq:
             current_distance, current_vertex = heapq.heappop(pq)
@@ -742,14 +744,15 @@ class Bot:
     def distribute_troops_by_plan(self, total_troops, distributions):
         if self.plan is not None:
             for group in self.plan['groups']:
+                if group['assign_troops'] == 0:
+                    continue
+                assign_troops = group['assign_troops']
                 if group['from'] not in self.territories[self.id_me]:
                     while group['from'] not in self.territories[self.id_me]:
                         for g in self.plan["groups"]:
                             if group['from'] in g['tgt']+g['target']:
                                 group = g
-                if group['assign_troops'] == 0:
-                    continue
-                distributed_troops = min(total_troops, group['assign_troops'])
+                distributed_troops = min(total_troops, assign_troops)
                 distributions[group["from"]] += distributed_troops
                 total_troops -= distributed_troops
                 write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
