@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.10'
+VERSION = '13.0.11'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -190,7 +190,7 @@ class BotState:
                 self.economy[pid] = self.sum_up_troops_get_next_turn(pid) 
     
     def approve_infinity_fire(self):
-        return self.troops[self.id_me] / sum(self.troops.values()) > 0.25 or self.clock > 1000 
+        return self.troops[self.id_me] / sum(self.troops.values()) > 0.26 or self.clock > 1000 
     
     def update_status(self):
         self.construct_player_id()
@@ -673,7 +673,7 @@ class BotState:
         pass
 
     def minimum_attack(self):
-        if self.got_territoty_this_turn and (not self.approve_infinity_fire()):
+        if self.got_territoty_this_turn:# and (not self.approve_infinity_fire()):
             return
         plan = {
             'code': 2, 
@@ -712,11 +712,13 @@ class BotState:
         return 
 
     # Claim Territories
-    def choose_adjacent_with_info(self, info):
-        territories = a_and_b(self.adjacent_territories, info)
-        if territories:
-            return territories[0]
-        return info[0]
+    def choose_adjacent_with_info(self, name):
+        for territory in CONTINENT[name]:
+            if territory in self.territories[None] and territory in self.adjacent_territories:
+                return territory
+        for territory in CONTINENT[name]:
+            if territory in self.territories[None]:
+                return territory
     
     def block_players(self):
         risk_list = self.check_continent_occupy_risk()
@@ -770,7 +772,7 @@ class BotState:
         if len(pr_list) > 0:
             prefered_name, pr = sorted(pr_list, key=lambda x:x[1])[-1]
             if pr >= 0.50:
-                return list(set(self.territories[None]) & set(CONTINENT[prefered_name]))
+                return prefered_name
         return None
     
     def check_continent_availibility(self):
@@ -1176,11 +1178,12 @@ def handle_claim_territory(game: Game, bot_state: BotState, query: QueryClaimTer
         return game.move_claim_territory(query, territory)
 
     # step 2 check if we can dominent one specific continent
-    territories = bot_state.search_preferred_continent()
-    if territories:
-        territory = bot_state.choose_adjacent_with_info(territories)
-        write_log(bot_state.clock, "Claim", f"decided by collect continent, {territory}")
-        return game.move_claim_territory(query, territory)
+    name = bot_state.search_preferred_continent()
+    if name:
+        territory = bot_state.choose_adjacent_with_info(name)
+        if territory is not None:
+            write_log(bot_state.clock, "Claim", f"decided by collect continent, {territory}")
+            return game.move_claim_territory(query, territory)
     
     # step 3 try to maximise the adjacent territory
     sorted_group = bot_state.get_sorted_connected_group(bot_state.territories[bot_state.id_me])
