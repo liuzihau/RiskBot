@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.2'
+VERSION = '13.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -868,9 +868,9 @@ class BotState:
         pq = []
         for border, values in self.threat_this_turn.items():
             if values['is_door']:
-                heapq.heappush(pq, (2 - values['diff'], border))
+                heapq.heappush(pq, (values['diff'] - 2, border))
             else:
-                heapq.heappush(pq, (-values['diff'], border))
+                heapq.heappush(pq, (values['diff'], border))
         record = defaultdict(lambda: 0)
         while total_troops > 0:
             troops, border = heapq.heappop(pq)
