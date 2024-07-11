@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.0'
+VERSION = '13.0.1'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -142,26 +142,54 @@ class BotState:
     def __init__(self, state):
         self.state = state
         self.id_me = None
+        self.id_all_player = []
         self.ids_others = []
         self.territories = {}
+        self.troops = {}
+        self.economy = {}
+        self.continent_owner = {}
+        self.continent_owned_by = {}
+        self.enemy_status = {}
         self.adjacent_territories = []
         self.border_territories = []
         self.plan = None
         self.got_territoty_this_turn = False
         self.clock = 0
 
-
-    def update_status(self):
+    def construct_player_id(self):
         if self.id_me is None:
             self.id_me = self.state.me.player_id
-            self.ids_others = list({0, 1, 2, 3, 4} - {self.id_me})
-        self.territories[None] = self.state.get_territories_owned_by(None)
-        self.territories[self.id_me] = self.state.get_territories_owned_by(self.id_me)
-        for pid in self.ids_others:
+            self.id_all_player = [player for player in self.state.players]
+            self.ids_others = a_minus_b(self.id_all_player, [self.id_me])
+
+    def check_continent_owner(self, pid):
+        self.continent_owned_by[pid] = []
+        for name in CONTINENT:
+            self.continent_owner[name] = None
+            intersection = a_and_b(CONTINENT[name], self.territories[pid])
+            if len(intersection) == len(CONTINENT[name]):
+                self.continent_owner[name] = pid
+                self.continent_owned_by[pid].append(name)
+                break
+    
+    def get_overall_player_status(self):
+        for pid in self.id_all_player + [None]:
             self.territories[pid] = self.state.get_territories_owned_by(pid)
+            self.check_continent_owner(pid)
+            self.troops[pid] = self.sum_up_troops(self.territories[pid])
+            if pid is not None:
+                self.economy[pid] = self.sum_up_troops_get_next_turn(pid) 
+
+    def update_status(self):
+        self.construct_player_id()
+        self.get_overall_player_status()
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
     
+    def write_player_information(self, pid):
+        msg = f"cards: {self.state.players[pid].card_count} troops: {self.troops[pid]}, economy: {self.economy[pid]}, hold continents:{self.continent_owned_by[pid]}, territories: {self.territories[pid]}"
+        write_log(self.clock, f"Status Player{pid}", msg)
+
     # Plan related
     def plan_to_do(self):
         """
@@ -257,6 +285,8 @@ class BotState:
 
     def choose_territory_minimuize_border(self, terr_set, effective_border, name=None):
         if self.got_territoty_this_turn:
+            # if self.clock < 600: TODO
+            #     return
             diff_criteria = 3
             border_criteria = -1
         else:
@@ -396,9 +426,9 @@ class BotState:
                 "reward": REWARD[name],
                 "groups":[]
                 }
-            enemy_territories = a_minus_b(CONTINENT[name], self.territories[self.id_me])
-            if len(enemy_territories) == 0:
+            if self.continent_owner[name] == self.id_me:
                 continue
+            enemy_territories = a_minus_b(CONTINENT[name], self.territories[self.id_me])
             ttl_my_reachable_territories, ttl_border_territories = self.get_border_territories_within_group(enemy_territories)
             if len(ttl_my_reachable_territories) == 0:
                 continue
@@ -692,6 +722,15 @@ class BotState:
             territory = self.state.territories[tid]
             troops += territory.troops
         return troops
+    
+    def sum_up_troops_get_next_turn(self, pid):
+        basic_income = max(3, len(self.territories[pid]) // 3)
+        bonus_income = 0 # TODO I don't know what it is
+        continent_income = 0
+        for name in self.continent_owned_by[pid]:
+            continent_income = REWARD[name]
+        
+        return basic_income + bonus_income + continent_income 
     
     def enemy_troops_in_continent(self, name):
         enemy_troops = 0
@@ -1169,6 +1208,9 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # step 0
     # bot_state.previous_territories = bot_state.territories[bot_state.id_me]
     bot_state.update_status()
+    for pid in bot_state.id_all_player:
+        bot_state.write_player_information(pid)
+
     bot_state.plan_to_do()
     write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
     total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
@@ -1176,9 +1218,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
         return game.move_distribute_troops(query, distributions)
 
     # step 1 distribute remain troops in effective border
-    # We will distribute troops across our border territories.
     # We will equally distribute across border territories in the early game,
-    # but start doomstacking in the late game.
     if len(game.state.recording) < 1000:
         total_troops, distributions = bot_state.distribute_troops_to_connected_border(total_troops, distributions)
     else:
@@ -1186,20 +1226,6 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
         total_troops, distributions = bot_state.find_a_good_arena(total_troops, distributions)
 
 
-        # my_territories = game.state.get_territories_owned_by(game.state.me.player_id)
-        # weakest_players = sorted(game.state.players.values(), key=lambda x: sum(
-        #     [game.state.territories[y].troops for y in game.state.get_territories_owned_by(x.player_id)]
-        # ))
-
-        # for player in weakest_players:
-        #     bordering_enemy_territories = set(game.state.get_all_adjacent_territories(my_territories)) & set(game.state.get_territories_owned_by(player.player_id))
-        #     if len(bordering_enemy_territories) > 0:
-        #         print("my territories", [game.state.map.get_vertex_name(x) for x in my_territories])
-        #         print("bordering enemies", [game.state.map.get_vertex_name(x) for x in bordering_enemy_territories])
-        #         print("adjacent to target", [game.state.map.get_vertex_name(x) for x in game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])])
-                # selected_territory = list(set(game.state.map.get_adjacent_to(list(bordering_enemy_territories)[0])) & set(my_territories))[0]
-                # distributions[selected_territory] += total_troops
-                # break
 
 
     return game.move_distribute_troops(query, distributions)
@@ -1235,6 +1261,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
     moving_troops = bot_state.moving_troops_based_on_plan_code(record_attack, move_attack)
+
 
     return game.move_troops_after_attack(query, moving_troops)
 
