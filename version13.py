@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.7'
+VERSION = '13.0.8'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -1026,12 +1026,12 @@ class BotState:
             write_log(self.clock, "AfterAttack", f"{src} is not in threat list and is not door, so stay 1 troops")
             return max_troops - 1
         if self.threat_this_turn[src]['is_door']:
-            stay_troops = max(1, (2 - self.threat_this_turn[src]['enemy_troops']))
+            stay_troops = max(1, (2 + self.threat_this_turn[src]['enemy_troops']))
             moving_troops = max(min_troops, max_troops - stay_troops)
             write_log(self.clock, "AfterAttack", f"{src} is in threat list and is door, so stay {stay_troops} troops")
             return moving_troops
         else:
-            stay_troops = max(1, (-self.threat_this_turn[src]['enemy_troops']))
+            stay_troops = max(1, (self.threat_this_turn[src]['enemy_troops']))
             moving_troops = max(min_troops, max_troops - stay_troops)
             write_log(self.clock, "AfterAttack", f"{src} is in threat list and is not door, so stay {stay_troops} troops")
             return moving_troops
