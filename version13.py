@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.11'
+VERSION = '13.0.12'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -371,9 +371,10 @@ class BotState:
                     continue
                 theat_id = max(adj, key=lambda x:self.state.territories[x].troops)
                 proposal_threat[d] = self.state.territories[theat_id].troops
-                defend_difficulty += proposal_threat[d]
                 if d in self.territories[self.id_me] and d not in ttl_border_territories:
-                    defend_difficulty -= self.state.territories[d].troops
+                    defend_difficulty += max(0, proposal_threat[d] - self.state.territories[d].troops)
+                else:
+                    defend_difficulty += proposal_threat[d]
             if diff + self.troops_can_distribute() < DEVIATION[name]:
                 continue
             plan = {
@@ -538,7 +539,7 @@ class BotState:
         for pid in target_list:
             if not self.state.players[pid].alive:
                 continue
-            enemy_troops = self.sum_up_troops(self.territories[pid]) - len(self.border_territories)
+            enemy_troops = self.sum_up_troops(self.territories[pid])# - len(self.border_territories)
             write_log(self.clock, 'Debug Kill', f"[Player {pid}] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             troops_edge = my_troops - enemy_troops - len(self.territories[pid])
             if troops_edge < 5:
@@ -552,7 +553,7 @@ class BotState:
                 'my_territories': self.territories[self.id_me], 
                 'border_territories': self.border_territories
             }
-            if plan['reward'] == 0 or self.state.players[pid].card_count < 2:
+            if self.state.players[pid].card_count < 2:
                 continue
 
             groups = self.find_killing_path(pid)
@@ -606,7 +607,7 @@ class BotState:
             chosen_path = None
             while len(chosen_paths) > 0:
                 cand = chosen_paths.pop(0)
-                for tid in cand['target']:
+                for tid in a_minus_b(cand['target'], [cand['to']]):
                     cand["enemy_troops"] += self.state.territories[tid].troops
                 my_active_troops = assignable_troops + cand['my_troops'] - allocated_troops[cand['from']] - 1
                 minimum_needed_troops = cand['enemy_troops'] + len(cand['tgt'])
