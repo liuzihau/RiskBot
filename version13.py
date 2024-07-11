@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.6'
+VERSION = '13.0.7'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -425,7 +425,9 @@ class BotState:
             'border_territories': effective_border
         }
         for src in effective_border:
-            tgts = list(set(self.state.map.get_adjacent_to(src)) - set(self.territories[self.id_me]))
+            tgts = a_minus_b(self.state.map.get_adjacent_to(src), self.territories[self.id_me])
+            if name is not None:
+                tgts = a_and_b(tgts, CONTINENT[name])
             for tgt in tgts:
                 new_border = self.state.get_all_border_territories(terr_set + [tgt])
                 border_decrease_count = len(origin_border) - len(new_border)
@@ -686,7 +688,7 @@ class BotState:
                 adjacent_territory = self.state.territories[cid]
                 cost = adjacent_territory.troops
                 diff = current_territory.troops - cost - 1
-                if diff + self.troops_can_distribute() < 2:
+                if diff + self.troops_can_distribute() < 0:
                     continue
                 # for name in CONTINENT:
                 #     if cid in CONTINENT[name]:
@@ -1024,12 +1026,12 @@ class BotState:
             write_log(self.clock, "AfterAttack", f"{src} is not in threat list and is not door, so stay 1 troops")
             return max_troops - 1
         if self.threat_this_turn[src]['is_door']:
-            stay_troops = max(1, (2 - self.threat_this_turn[src]['diff']))
+            stay_troops = max(1, (2 - self.threat_this_turn[src]['enemy_troops']))
             moving_troops = max(min_troops, max_troops - stay_troops)
             write_log(self.clock, "AfterAttack", f"{src} is in threat list and is door, so stay {stay_troops} troops")
             return moving_troops
         else:
-            stay_troops = max(1, (-self.threat_this_turn[src]['diff']))
+            stay_troops = max(1, (-self.threat_this_turn[src]['enemy_troops']))
             moving_troops = max(min_troops, max_troops - stay_troops)
             write_log(self.clock, "AfterAttack", f"{src} is in threat list and is not door, so stay {stay_troops} troops")
             return moving_troops
@@ -1327,6 +1329,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     """
     bot_state.got_territoty_this_turn = True
     bot_state.update_status()
+    bot_state.defend_my_continent()
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
     moving_troops = bot_state.moving_troops_based_on_plan_code(record_attack, move_attack)
