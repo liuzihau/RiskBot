@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.8'
+VERSION = '13.0.9'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -320,9 +320,9 @@ class BotState:
                 self.plan = expension_plan
                 return 
         
-        minimum_attack_list = self.minimum_attack()
-        if minimum_attack_list is not None:
-            self.plan = minimum_attack_list[0]
+        minimum_attack_plan = self.minimum_attack()
+        if minimum_attack_plan is not None:
+            self.plan = minimum_attack_plan
 
         return
 
@@ -671,7 +671,7 @@ class BotState:
         pass
 
     def minimum_attack(self):
-        if not self.approve_infinity_fire() and self.got_territoty_this_turn:
+        if self.got_territoty_this_turn and (not self.approve_infinity_fire()):
             return
         plan = {
             'code': 2, 
@@ -690,15 +690,13 @@ class BotState:
                 diff = current_territory.troops - cost - 1
                 if diff + self.troops_can_distribute() < 0:
                     continue
-                # for name in CONTINENT:
-                #     if cid in CONTINENT[name]:
                 plan['groups'].append(
                     {
                         'src': [tid], 
                         'tgt': [cid], 
                         'enemy_troops': cost,
                         'my_troops': current_territory.troops,
-                        'assign_troops': 0, 
+                        'assign_troops': 0,
                         "from": tid,
                         "to": cid,
                         }
@@ -708,7 +706,7 @@ class BotState:
             plan['cost'] = plan['groups'][0]['enemy_troops']
             plan['diff'] = plan['groups'][0]['my_troops'] - plan['groups'][0]['enemy_troops'] - 1
             plan['groups'][0]['assign_troops'] = max(0, (2 - plan['diff'] + 1))
-            return 
+            return plan
         return 
 
     # Claim Territories
