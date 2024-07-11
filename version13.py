@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.12'
+VERSION = '13.0.13'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -42,12 +42,12 @@ CONTINENT = {
     }
 
 PREFER = {
-    "AU": 0.05,
-    "SA": 0.04,
-    "NA": 0.03,
-    "AF": 0.01,
-    "EU": -0.4,
-    "AS": -0.6
+    "AU": 0.0,
+    "SA": 0.0,
+    "NA": 0.0,
+    "AF": 0.0,
+    "EU": 0.0,
+    "AS": -0.5
     }
 
 DOOR = {
@@ -179,7 +179,6 @@ class BotState:
             if len(intersection) == len(CONTINENT[name]):
                 self.continent_owner[name] = pid
                 self.continent_owned_by[pid].append(name)
-                break
     
     def get_overall_player_status(self):
         for pid in self.id_all_player + [None]:
