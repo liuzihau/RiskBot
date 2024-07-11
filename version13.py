@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.9'
+VERSION = '13.0.10'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -372,6 +372,8 @@ class BotState:
                 theat_id = max(adj, key=lambda x:self.state.territories[x].troops)
                 proposal_threat[d] = self.state.territories[theat_id].troops
                 defend_difficulty += proposal_threat[d]
+                if d in self.territories[self.id_me] and d not in ttl_border_territories:
+                    defend_difficulty -= self.state.territories[d].troops
             if diff + self.troops_can_distribute() < DEVIATION[name]:
                 continue
             plan = {
