@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.7'
+VERSION = '14.0.8'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -185,7 +185,7 @@ class BotState:
         self.territories = {}
         self.troops = {}
         self.economy = {}
-        self.continent_owner = {}
+        self.continent_owner = {'NA':None, 'AU':None, 'SA':None, 'AF':None, 'AS':None, 'EU':None}
         self.continent_owned_by = {}
         self.threat_this_turn = {}
         self.troops_for_defend = 0
@@ -205,13 +205,14 @@ class BotState:
     def check_continent_owner(self, pid):
         self.continent_owned_by[pid] = []
         for name in CONTINENT:
-            self.continent_owner[name] = None
             intersection = a_and_b(CONTINENT[name], self.territories[pid])
             if len(intersection) == len(CONTINENT[name]):
                 self.continent_owner[name] = pid
                 self.continent_owned_by[pid].append(name)
     
     def get_overall_player_status(self):
+        for name in self.continent_owner:
+            self.continent_owner[name] = None
         for pid in self.id_all_player + [None]:
             self.territories[pid] = self.state.get_territories_owned_by(pid)
             self.check_continent_owner(pid)
@@ -339,7 +340,10 @@ class BotState:
                 return
 
         # step 5 try interupt other players' continent
-        interupt_plan_list = self.interupt_opponunt_continent() #TODO
+        interupt_plan_list = self.interupt_opponunt_continent()
+        if interupt_plan_list is not None:
+            self.plan = interupt_plan_list[0]
+            return
 
         # step 6 try attack 1 territory that in the interested continent 
         if occupy_plan_list is not None:
@@ -613,7 +617,7 @@ class BotState:
                 total_diff = 0
                 for group_plan in plan['groups']:
                     total_cost += group_plan["enemy_troops"]
-                    total_diff += group_plan["my_troops"] - group_plan["enemy_troops"] + len(group_plan["tgt"]) + len(group_plan['target'])
+                    total_diff += group_plan["my_troops"] - group_plan["enemy_troops"] - len(group_plan["tgt"]) - len(group_plan['target']) + 2
                 plan['cost'] = total_cost
                 plan['diff'] = total_diff
                 if total_diff > 2:
@@ -628,8 +632,7 @@ class BotState:
         target_groups = group_connected_territories(self.territories[target_id], self.state)
         return self.find_shortest_cost_from_group_to_group(self.border_territories, target_groups, enemy_territories)
 
-    def find_shortest_cost_from_group_to_group(self, srcs: list, targets: list, enemy_territories) -> Union[list[int], None]:
-        criteria = 3
+    def find_shortest_cost_from_group_to_group(self, srcs: list, targets: list, enemy_territories, criteria=3) -> Union[list[int], None]:
         groups = []
         assignable_troops = self.troops_can_distribute()
         allocated_troops = defaultdict(lambda: 0)
@@ -665,7 +668,7 @@ class BotState:
                 groups = None
                 break
 
-            write_log(self.clock, 'Debug Kill', f"chosen path for {chosen_path['target']}, {chosen_path}")
+            write_log(self.clock, 'Debug Path', f"chosen path for {chosen_path['target']}, {chosen_path}")
             
             chosen_path['assign_troops'] = max(0, (criteria + minimum_needed_troops + 1 - chosen_path['my_troops']))
             allocated_troops[chosen_path['from']] += minimum_needed_troops + criteria
@@ -678,7 +681,7 @@ class BotState:
             enemy_territories = a_minus_b(enemy_territories, srcs)
             srcs = self.state.get_all_adjacent_territories(enemy_territories)
 
-        write_log(self.clock, 'Debug Kill', f"final group {groups}")
+        # write_log(self.clock, 'Debug Path', f"final group {groups}")
         return groups
         
     def dijkstra(self, src: int, targets: list, enemy_territories, allocated_troops) -> tuple:
@@ -718,7 +721,49 @@ class BotState:
         return None, float('infinity'), None
     
     def interupt_opponunt_continent(self):
-        pass
+        plan_list = []
+        for name in CONTINENT:
+            pid = self.continent_owner[name]
+            if pid is None or pid == self.id_me: 
+                continue
+            # quick check
+            door_troops = [self.state.territories[t].troops for t in DOOR[name]]
+            border_troops = [self.state.territories[t].troops for t in self.border_territories]
+            if min(door_troops) > max(border_troops) + self.troops_can_distribute() + 1:
+                continue
+            write_log(self.clock, 'Interupt Overview', f"[{name}] owner: Player {pid}, economy: {self.economy[pid]}, enemy_troops: {self.troops[pid]}")
+
+            plan = {
+                'code':1, 
+                'name':name,
+                'pid': pid,
+                'reward': REWARD[name],
+                'groups':[],
+                'my_territories': self.territories[self.id_me], 
+                'border_territories': self.border_territories
+            }
+            enemy_territories = a_minus_b(WHOLEMAP, self.territories[self.id_me])
+            groups = []
+            for target in DOOR[name]:
+                info = self.find_shortest_cost_from_group_to_group(self.border_territories, [[target]], enemy_territories)
+                if info is not None and len(info) > 0:
+                    group = info[0]
+                    groups.append(group)
+            if len(groups) == 0:
+                continue
+            groups = sorted(groups, key=lambda x: x['enemy_troops'])
+            plan['groups'] = groups
+            plan['cost'] = plan['groups'][0]["enemy_troops"]
+            plan['diff'] = plan['groups'][0]["my_troops"] - plan['groups'][0]["enemy_troops"] - len(plan['groups'][0]["tgt"]) + 1
+            # if plan['groups'][0]['from'] in self.threat_this_turn:
+            #     plan['diff'] -= self.threat_this_turn[plan['groups'][0]['from']]['enemy_troops']
+            write_log(self.clock, 'Interupt Debug', f"target: {name}, path: {plan}")
+            if plan['diff'] > 2 and plan['cost'] < self.troops[self.id_me] / 3:
+                plan_list.append(plan)
+            
+        if len(plan_list) > 0:
+            plan_list = sorted(plan_list, key=lambda x:x['diff'], reverse=True)
+            return plan_list
 
     def minimum_attack(self):
         if self.got_territoty_this_turn:
@@ -948,7 +993,8 @@ class BotState:
         if len(pq) == 0:
             return total_troops, distributions
         total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
-        write_log(self.clock, 'Distribute', f"defending continent: {dict(record)}")
+        for territory, troops in record.items():
+            write_log(self.clock, 'Distribute', f"distributed by defending, put {troops} troops to territory {territory}")
         return total_troops, distributions
 
     def distribute_troops_to_connected_border(self, total_troops, distributions):
