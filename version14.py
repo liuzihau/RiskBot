@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.11'
+VERSION = '14.0.13'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -243,9 +243,9 @@ class BotState:
         troops_ratio = (self.troops[self.id_me] + self.troops_can_distribute()) / sum(self.troops.values())
         alive_players = sum([int(self.state.players[p].alive) for p in self.state.players])
         if alive_players == 2:
-            middle_game_criteria = 0.47
+            middle_game_criteria = 0.51
         elif alive_players > 2:
-            middle_game_criteria = 0.4
+            middle_game_criteria = 0.45
         middle_game_condition = troops_ratio > middle_game_criteria and 500 <= self.clock < 1500
         end_game_condition = self.clock >= 1500
         return middle_game_condition or end_game_condition
@@ -321,7 +321,7 @@ class BotState:
         self.troops_for_defend = 0
 
         # step 2 try kill player 
-        kill_plan_list = None if self.state.card_sets_redeemed < 3 or tried_kill else self.kill_player()
+        kill_plan_list = None if tried_kill else self.kill_player()
         if kill_plan_list is not None:
             self.plan = kill_plan_list[0]
             return
@@ -1202,6 +1202,8 @@ class BotState:
             return self.put_troops_on_target_greedy(src_territory, tgt_territory, max_troops, min_troops)
         elif self.plan["code"] in [1, 2, 4, 5]:
             return self.put_troops_on_attack_territory(src_territory, tgt_territory, max_troops, min_troops)
+        elif self.plan["code"] == 6:
+            return max_troops - 1
         else:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
 
@@ -1305,8 +1307,10 @@ class BotState:
                 write_log(self.clock, "Fortify", f"find weakest border from {borders} in {group} (our territoreis={self.state.get_territories_owned_by(self.id_me)})")
                 return sorted(borders, key=lambda x: self.state.territories[x].troops), group
 
-        borders = list(set(groups[0]) & set(self.border_territories))
-        return sorted(borders, key=lambda x: self.state.territories[x].troops), groups[0]
+        largest_groups = [group for group in groups if len(group) == len(groups[0])]
+        max_troops_group = max(largest_groups, key=lambda x: self.sum_up_troops(x))
+        borders = a_and_b(max_troops_group, self.border_territories)
+        return sorted(borders, key=lambda x: self.state.territories[x].troops), max_troops_group
     
     def find_strongest_territories(self, weakest_territories, group):
         # first we check the largest troops we can use in the inner territories
