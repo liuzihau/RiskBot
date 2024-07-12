@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.0'
+VERSION = '14.0.1'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -99,9 +99,9 @@ def defend_coefficient(enemy_troops):
     elif enemy_troops < 6:
         return 0
     elif enemy_troops < 10:
-        return int(enemy_troops * .8)
+        return -int(enemy_troops * .25)
     else:
-        return int(enemy_troops * .7)
+        return -int(enemy_troops * .35)
     
 def a_minus_b(a:list, b:list)->list:
     return list(set(a) - set(b))
@@ -282,6 +282,8 @@ class BotState:
                     'border_territories': [8, 3]
                     }
         """
+
+        # step 0 check if last run is killing player, if so, keep killing
         tried_kill = False
         if self.plan is not None and self.plan['code'] == 3:
             kill_plan_list = self.kill_player(self.plan['pid'])
@@ -290,19 +292,26 @@ class BotState:
                 self.plan = kill_plan_list[0]
                 return
         
+        # step 1 reset plan
         self.plan = None
+        self.troops_for_defend = 0
 
-        # aggressive move
+        # step 2 try kill player 
         kill_plan_list = None if self.state.card_sets_redeemed < 3 or tried_kill else self.kill_player()
         if kill_plan_list is not None:
             self.plan = kill_plan_list[0]
             return
 
+        # step 3 defend our own continent
+        self.get_defending_continent_proposal()
+        self.update_defending_troops()
+        write_log(self.clock, 'Defend', f"require {self.troops_for_defend} to defend ({self.threat_this_turn})")
+
+        # step 4 try occupy continent
         occupy_plan_list = self.occupy_new_continent()
         write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
         if occupy_plan_list is not None:
             if occupy_plan_list[0]['diff'] - occupy_plan_list[0]['defend_difficulty'] > 0:
-
                 for d, v in occupy_plan_list[0]['proposal_threat'].items():
                     if d in self.threat_this_turn:
                         continue
@@ -316,10 +325,10 @@ class BotState:
                 self.plan = occupy_plan_list[0]
                 return
 
+        # step 5 try interupt other players' continent
         interupt_plan_list = self.interupt_opponunt_continent() #TODO
 
-
-        # strategic attack for future
+        # step 6 try attack 1 territory that in the interested continent 
         if occupy_plan_list is not None:
             terr_set, border = occupy_plan_list[0]["my_territories"], occupy_plan_list[0]["border_territories"]
             expension_plan = self.choose_territory_minimuize_border(terr_set, border, occupy_plan_list[0]["name"])
@@ -327,6 +336,7 @@ class BotState:
                 self.plan = expension_plan
                 return 
         
+        # step 7 try attack 1 territory that can cease our border presure or at least the same level
         groups = self.get_sorted_connected_group(self.territories[self.id_me])
         largest_group = groups[0]
         if len(largest_group) > 2:
@@ -336,13 +346,14 @@ class BotState:
                 self.plan = expension_plan
                 return 
         
+        # step 8 find a minimum cost territory to finish at least 1 attack
         minimum_attack_plan = self.minimum_attack()
         if minimum_attack_plan is not None:
             self.plan = minimum_attack_plan
 
         return
 
-    def defend_my_continent(self):
+    def get_defending_continent_proposal(self):
         self.threat_this_turn = {}
         continents = self.continent_owned_by[self.id_me]
         groups = self.get_sorted_connected_group(self.territories[self.id_me])
@@ -355,8 +366,8 @@ class BotState:
             for key in self.threat_this_turn:
                 if key in DOOR[name]:
                     self.threat_this_turn[key]['is_door'] = True
-        
-        self.troops_for_defend = 0
+
+    def update_defending_troops(self):
         for key in self.threat_this_turn:
             border = self.threat_this_turn[key]
             if border['is_door']:
@@ -393,10 +404,11 @@ class BotState:
                     continue
                 theat_id = max(adj, key=lambda x:self.state.territories[x].troops)
                 proposal_threat[d] = self.state.territories[theat_id].troops
+                effect_difficulty = proposal_threat[d] - defend_coefficient(proposal_threat[d])
                 if d in self.territories[self.id_me] and d not in ttl_border_territories:
-                    defend_difficulty += max(0, proposal_threat[d] - self.state.territories[d].troops)
+                    defend_difficulty += max(0, effect_difficulty - self.state.territories[d].troops)
                 else:
-                    defend_difficulty += proposal_threat[d]
+                    defend_difficulty += effect_difficulty
             if diff + self.troops_can_distribute() < DEVIATION[name]:
                 continue
             plan = {
@@ -562,8 +574,8 @@ class BotState:
             if not self.state.players[pid].alive:
                 continue
             enemy_troops = self.sum_up_troops(self.territories[pid])# - len(self.border_territories)
-            write_log(self.clock, 'Debug Kill', f"[Player {pid}] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             troops_edge = my_troops - enemy_troops - len(self.territories[pid])
+            write_log(self.clock, 'Kill Overview', f"[Player {pid}] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             if troops_edge < 5:
                 continue
             plan = {
@@ -696,7 +708,7 @@ class BotState:
         pass
 
     def minimum_attack(self):
-        if self.got_territoty_this_turn:# and (not self.approve_infinity_fire()):
+        if self.got_territoty_this_turn:
             return
         plan = {
             'code': 2, 
@@ -952,16 +964,17 @@ class BotState:
     def stack_to_attack_point(self, total_troops, distributions):
         if self.plan is not None:
             group_counts = len(self.plan['groups'])
-            equal_distribute = total_troops // group_counts
-            for group in self.plan['groups']:
-                if group['from'] not in self.territories[self.id_me]:
-                    while group['from'] not in self.territories[self.id_me]:
-                        for g in self.plan["groups"]:
-                            if group['from'] in g['tgt']+g['target']:
-                                group = g
-                distributions[group['from']] += equal_distribute
-                total_troops -= equal_distribute
-                write_log(self.clock, 'Distribute', f"extra distributed {equal_distribute} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
+            equally_distribute = total_troops // group_counts
+            if equally_distribute > 0:
+                for group in self.plan['groups']:
+                    if group['from'] not in self.territories[self.id_me]:
+                        while group['from'] not in self.territories[self.id_me]:
+                            for g in self.plan["groups"]:
+                                if group['from'] in g['tgt']+g['target']:
+                                    group = g
+                    distributions[group['from']] += equally_distribute
+                    total_troops -= equally_distribute
+                    write_log(self.clock, 'Distribute', f"extra distributed {equally_distribute} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
 
             distributions[self.plan['groups'][0]['from']] += total_troops
             write_log(self.clock, 'Distribute', f"extra distributed {total_troops} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
@@ -1060,7 +1073,7 @@ class BotState:
         if self.plan is None:
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
         if src not in self.threat_this_turn:
-            write_log(self.clock, "AfterAttack", f"{src} is not in threat list and is not door, so stay 1 troops")
+            write_log(self.clock, "AfterAttack", f"{src} is not in threat list, so stay 1 troops")
             return max_troops - 1
         if self.threat_this_turn[src]['is_door']:
             stay_troops = max(1, (2 + self.threat_this_turn[src]['enemy_troops']))
@@ -1301,10 +1314,8 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     total_troops = game.state.me.troops_remaining
     distributions = defaultdict(lambda: 0)
 
-    # We need to remember we have to place our matching territory bonus
-    # if we have one.
+    # We need to remember we have to place our matching territory bonus if we have one.
     if len(game.state.me.must_place_territory_bonus) != 0:
-        write_log(bot_state.clock, "Distribute", f"bonus : {game.state.me.must_place_territory_bonus}, my terr : {game.state.get_territories_owned_by(game.state.me.player_id)}")
         assert total_troops >= 2
         for i in game.state.me.must_place_territory_bonus:
             if i in game.state.get_territories_owned_by(game.state.me.player_id):
@@ -1316,8 +1327,6 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     bot_state.update_status()
     for pid in bot_state.id_all_player:
         bot_state.write_player_information(pid)
-    bot_state.defend_my_continent()
-    write_log(bot_state.clock, 'Defend', f"require {bot_state.troops_for_defend} to defend")
     
     # plan
     bot_state.plan_to_do()
@@ -1362,7 +1371,7 @@ def handle_troops_after_attack(game: Game, bot_state: BotState, query: QueryTroo
     """
     bot_state.got_territoty_this_turn = True
     bot_state.update_status()
-    bot_state.defend_my_continent()
+    bot_state.get_defending_continent_proposal()
     record_attack = cast(RecordAttack, game.state.recording[query.record_attack_id])
     move_attack = cast(MoveAttack, game.state.recording[record_attack.move_attack_id])
     moving_troops = bot_state.moving_troops_based_on_plan_code(record_attack, move_attack)
