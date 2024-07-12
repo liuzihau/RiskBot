@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.3'
+VERSION = '14.0.4'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -973,7 +973,7 @@ class BotState:
                     write_log(self.clock, 'Distribute', f"extra distributed {equally_distribute} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
 
             distributions[self.plan['groups'][0]['from']] += total_troops
-            write_log(self.clock, 'Distribute', f"extra distributed {total_troops} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
+            write_log(self.clock, 'Distribute', f"extra distributed {total_troops} troops to territory {self.plan['groups'][0]['from']} for the attack_point by plan code {self.plan['code']}")
             total_troops -= total_troops
 
         else:
