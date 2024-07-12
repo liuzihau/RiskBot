@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.8'
+VERSION = '14.0.9'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -591,7 +591,7 @@ class BotState:
             if not self.state.players[pid].alive:
                 continue
             enemy_troops = self.sum_up_troops(self.territories[pid])# - len(self.border_territories)
-            troops_edge = my_troops - enemy_troops - len(self.territories[pid])
+            troops_edge = my_troops + self.troops_can_distribute()- enemy_troops - len(self.territories[pid])
             write_log(self.clock, 'Kill Overview', f"[Player {pid}] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             if troops_edge < 5:
                 continue
@@ -1067,12 +1067,9 @@ class BotState:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
         if self.plan["code"] == 0:
             return self.put_troops_on_attack_territory(src_territory, tgt_territory, max_troops, min_troops)
-        elif self.plan["code"] == 1:
-            write_log(self.clock, "AfterAttack", f"move from {src_territory} to {tgt_territory} with moving_troops")
-            return max_troops - 1
         elif self.plan["code"] == 3:
             return self.put_troops_on_target_greedy(src_territory, tgt_territory, max_troops, min_troops)
-        elif self.plan["code"] in [2, 4, 5]:
+        elif self.plan["code"] in [1, 2, 4, 5]:
             return self.put_troops_on_attack_territory(src_territory, tgt_territory, max_troops, min_troops)
         else:
             return self.put_troops_on_border(src_territory, tgt_territory, max_troops, min_troops)
@@ -1342,7 +1339,7 @@ def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards
 
     # Remember we can't redeem any more than the required number of card sets if 
     # we have just eliminated a player.
-    if game.state.card_sets_redeemed > 12 and query.cause == "turn_started":
+    if game.state.card_sets_redeemed > 8 and query.cause == "turn_started":
         card_set = game.state.get_card_set(cards_remaining)
         while card_set != None:
             card_sets.append(card_set)
