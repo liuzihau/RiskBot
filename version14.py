@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.4'
+VERSION = '14.0.5'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -95,7 +95,7 @@ DIFF = {
 # help function
 def defend_coefficient(enemy_troops):
     if 0 < enemy_troops < 3:
-        return 1
+        return 2
     elif enemy_troops < 6:
         return 0
     elif enemy_troops < 10:
@@ -891,44 +891,50 @@ class BotState:
         return list(set(CONTINENT[name]) & set(self.territories[self.id_me]))
     
     # Distribute troops
+    def find_group_start_with_my_territory(self, plan, group):
+        if group['from'] not in self.territories[self.id_me]:
+            record_original_group = group
+            while group['from'] not in self.territories[self.id_me]:
+                for g in plan["groups"]:
+                    if group['from'] in g['tgt']+g['target']:
+                        group = g
+                if record_original_group == group:
+                    return
+            return group
+        else:
+            return group
+        
+    def distribute_troops_for_killing(self, total_troops, distributions):
+        if self.plan is not None and self.plan['code'] == 3:
+            pq = []
+            for group in self.plan['groups']:
+                group = self.find_group_start_with_my_territory(self.plan, group)
+                if group is None:
+                    continue
+                heapq.heappush(pq, (group['my_troops'], group['from']))
+            total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+            for territory, troops in record.items():
+                write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {troops} troops to territory {territory}")
+        return total_troops, distributions
+    
     def distribute_troops_by_plan(self, total_troops, distributions):
         if self.plan is not None:
             for group in self.plan['groups']:
                 if group['assign_troops'] == 0:
                     continue
                 assign_troops = group['assign_troops']
-                if group['from'] not in self.territories[self.id_me]:
-                    while group['from'] not in self.territories[self.id_me]:
-                        for g in self.plan["groups"]:
-                            if group['from'] in g['tgt']+g['target']:
-                                group = g
+                group = self.find_group_start_with_my_territory(self.plan, group)
+                if group is None:
+                    continue
                 distributed_troops = min(total_troops, assign_troops)
                 distributions[group["from"]] += distributed_troops
                 total_troops -= distributed_troops
-                write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']} by plan code {self.plan['code']}")
-
-            if self.plan['code'] == 3 and total_troops > 0:
-                pq = []
-                for group in self.plan['groups']:
-                    if group['from'] not in self.territories[self.id_me]:
-                        while group['from'] not in self.territories[self.id_me]:
-                            for g in self.plan["groups"]:
-                                if group['from'] in g['tgt']+g['target']:
-                                    group = g
-                    heapq.heappush(pq, (group['my_troops'], group['from']))
-                total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
-                write_log(self.clock, 'Distribute', f"extra distribute for code 3: {dict(record)}")
-
-            elif self.plan['code'] == 0 and total_troops > 0:
-                total_troops, distributions = self.stack_to_attack_point(total_troops, distributions)
+                write_log(self.clock, 'Distribute', f"distributed by plan (code {self.plan['code']}), put {distributed_troops} troops to territory {group['from']}")
         
-        total_troops, distributions = self.distribute_troops_by_defending(total_troops, distributions)
-        if total_troops > 0:
-            total_troops, distributions = self.distribute_troops_to_connected_border(total_troops, distributions)
-
         return total_troops, distributions
 
-    def distribute_troops_by_defending(self, total_troops, distributions):
+
+    def distribute_troops_for_defending(self, total_troops, distributions):
         if len(self.threat_this_turn) == 0:
             return total_troops, distributions
         pq = []
@@ -954,30 +960,29 @@ class BotState:
         for border in borders:
             heapq.heappush(pq, (self.state.territories[border].troops, border))
         total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
-        write_log(self.clock, 'Distribute', f"put in connected border: {dict(record)}")
+        for territory, troops in record.items():
+            write_log(self.clock, 'Distribute', f"distributed by put in connected border, put {troops} troops to territory {territory}")
         return total_troops, distributions
     
-    def stack_to_attack_point(self, total_troops, distributions):
-        if self.plan is not None:
+    def distribute_troops_for_occupying(self, total_troops, distributions):
+        if self.plan is not None and self.plan['code'] == 0:
+            cap_troops = min(total_troops, self.plan['cost'] // 2)
+            total_troops -= cap_troops
             group_counts = len(self.plan['groups'])
-            equally_distribute = total_troops // group_counts
+            equally_distribute = cap_troops // group_counts
             if equally_distribute > 0:
                 for group in self.plan['groups']:
-                    if group['from'] not in self.territories[self.id_me]:
-                        while group['from'] not in self.territories[self.id_me]:
-                            for g in self.plan["groups"]:
-                                if group['from'] in g['tgt']+g['target']:
-                                    group = g
+                    group = self.find_group_start_with_my_territory(self.plan, group)
+                    if group is None:
+                        continue
                     distributions[group['from']] += equally_distribute
-                    total_troops -= equally_distribute
-                    write_log(self.clock, 'Distribute', f"extra distributed {equally_distribute} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
+                    cap_troops -= equally_distribute
+                    write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {equally_distribute} troops to territory {group['from']}")
 
-            distributions[self.plan['groups'][0]['from']] += total_troops
-            write_log(self.clock, 'Distribute', f"extra distributed {total_troops} troops to territory {self.plan['groups'][0]['from']} for the attack_point by plan code {self.plan['code']}")
-            total_troops -= total_troops
-
-        else:
-            total_troops, distributions =  self.distribute_troops_to_connected_border(total_troops, distributions)
+            if cap_troops > 0:
+                distributions[self.plan['groups'][0]['from']] += cap_troops
+                total_troops -= cap_troops
+                write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {cap_troops} troops to territory {group['from']}")
 
         return total_troops, distributions
 
@@ -1327,8 +1332,17 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     # plan
     bot_state.plan_to_do()
     write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
+    write_log(bot_state.clock, "Distribute", f"total troops for distribute {total_troops}")
     total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
-
+    if total_troops > 0:
+        total_troops, distributions = bot_state.distribute_troops_for_killing(total_troops, distributions)
+    if total_troops > 0:
+        total_troops, distributions = bot_state.distribute_troops_for_defending(total_troops, distributions)
+    if total_troops > 0:
+        total_troops, distributions = bot_state.distribute_troops_for_occupying(total_troops, distributions)
+    if total_troops > 0:
+        total_troops, distributions = bot_state.distribute_troops_to_connected_border(total_troops, distributions)
+                
     return game.move_distribute_troops(query, distributions)
 
 def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[MoveAttack, MoveAttackPass]:
