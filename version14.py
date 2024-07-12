@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.1'
+VERSION = '14.0.2'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -910,10 +910,10 @@ class BotState:
                     total_troops -= 1
                     if total_troops == 0:
                         break
-
-            elif self.plan['code'] in [0, 4] and total_troops > 0:
+            elif self.plan['code'] == 0 and total_troops > 0:
                 total_troops, distributions = self.stack_to_attack_point(total_troops, distributions)
         
+        total_troops, distributions = self.distribute_troops_by_defending(total_troops, distributions)
         if total_troops > 0:
             total_troops, distributions = self.distribute_troops_to_connected_border(total_troops, distributions)
 
@@ -1332,14 +1332,6 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     bot_state.plan_to_do()
     write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
     total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
-    # step 1 distribute remain troops in effective border
-    # We will equally distribute across border territories in the early game,
-    # if len(game.state.recording) < 1000:
-    #     total_troops, distributions = bot_state.distribute_troops_by_defending(total_troops, distributions)    
-    # else:
-    #     # stack all my troops into one point
-
-
 
     return game.move_distribute_troops(query, distributions)
 
