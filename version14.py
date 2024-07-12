@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '13.0.13'
+VERSION = '14.0.0'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -40,6 +40,14 @@ CONTINENT = {
     "NA": [2, 3, 8, 7, 6, 1, 4, 5, 0],
     "AS": [20, 27, 21, 25, 26, 19, 23, 17, 24, 18, 22, 16]
     }
+SECONDCONTINENT = {
+    "AU":["AS"],
+    "SA":["AF", "NA"],
+    "AF":["EU", "SA"],
+    "EU":["AF", "NA"],
+    "NA":["AF", "EU"],
+    "AS":["AU", "NA", "AF", "EU"]
+}
 
 PREFER = {
     "AU": 0.0,
@@ -85,6 +93,16 @@ DIFF = {
 }
 
 # help function
+def defend_coefficient(enemy_troops):
+    if 0 < enemy_troops < 3:
+        return 1
+    elif enemy_troops < 6:
+        return 0
+    elif enemy_troops < 10:
+        return int(enemy_troops * .8)
+    else:
+        return int(enemy_troops * .7)
+    
 def a_minus_b(a:list, b:list)->list:
     return list(set(a) - set(b))
 
@@ -189,7 +207,7 @@ class BotState:
                 self.economy[pid] = self.sum_up_troops_get_next_turn(pid) 
     
     def approve_infinity_fire(self):
-        return self.troops[self.id_me] / sum(self.troops.values()) > 0.26 or self.clock > 1000 
+        return self.troops[self.id_me] / sum(self.troops.values()) > 0.28 and (self.clock > 1000 or len(self.continent_owned_by[self.id_me])>1)
     
     def update_status(self):
         self.construct_player_id()
@@ -299,7 +317,6 @@ class BotState:
                 return
 
         interupt_plan_list = self.interupt_opponunt_continent() #TODO
- 
 
 
         # strategic attack for future
@@ -343,13 +360,19 @@ class BotState:
         for key in self.threat_this_turn:
             border = self.threat_this_turn[key]
             if border['is_door']:
-                self.troops_for_defend += max(0, 2 - border['diff'])
+                final_defend_coeff = defend_coefficient(border['enemy_troops']) + 1
             else:
-                self.troops_for_defend += max(0, -1 - border['diff'])
+                final_defend_coeff = defend_coefficient(border['enemy_troops'])
+            self.troops_for_defend += max(0, final_defend_coeff - border['diff'])
 
     def occupy_new_continent(self):
+        if len(self.continent_owned_by[self.id_me]) == 1:
+            name = self.continent_owned_by[self.id_me][0]
+            candidates = SECONDCONTINENT[name]
+        else:
+            candidates = CONTINENT
         plan_list = []
-        for name in CONTINENT:
+        for name in candidates:
             if self.continent_owner[name] == self.id_me:
                 continue
             enemy_territories = a_minus_b(CONTINENT[name], self.territories[self.id_me])
@@ -412,12 +435,12 @@ class BotState:
             return
         if name is None:
             diff_criteria = 2 + int(self.got_territoty_this_turn)
-            cost = self.troops[self.id_me] // 7 - int(self.got_territoty_this_turn)
+            cost_criteria = self.troops[self.id_me] // 7 - int(self.got_territoty_this_turn)
             border_criteria = -2 + int(self.got_territoty_this_turn)
         else:
             diff_criteria = 2 + int(self.got_territoty_this_turn)
-            cost = self.troops[self.id_me] // 6 - int(self.got_territoty_this_turn)
-            border_criteria = -3 + int(self.got_territoty_this_turn)
+            cost_criteria = 9999
+            border_criteria = -4 + int(self.got_territoty_this_turn)
         origin_border = self.state.get_all_border_territories(terr_set)
         plan = {
             'code': 4 if name is not None else 5,
@@ -857,7 +880,8 @@ class BotState:
                 distributed_troops = min(total_troops, assign_troops)
                 distributions[group["from"]] += distributed_troops
                 total_troops -= distributed_troops
-                write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']}")
+                write_log(self.clock, 'Distribute', f"distributed {distributed_troops} troops to territory {group['from']} by plan code {self.plan['code']}")
+
             if self.plan['code'] == 3 and total_troops > 0:
                 pq = []
                 for group in self.plan['groups']:
@@ -873,7 +897,14 @@ class BotState:
                     heapq.heappush(pq, (troops+1, gid))
                     total_troops -= 1
                     if total_troops == 0:
-                        break                
+                        break
+
+            elif self.plan['code'] in [0, 4] and total_troops > 0:
+                total_troops, distributions = self.stack_to_attack_point(total_troops, distributions)
+        
+        if total_troops > 0:
+            total_troops, distributions = self.distribute_troops_to_connected_border(total_troops, distributions)
+
         return total_troops, distributions
 
     def distribute_troops_by_defending(self, total_troops, distributions):
@@ -918,20 +949,24 @@ class BotState:
                 break
         return total_troops, distributions
     
-    def find_a_good_arena(self, total_troops, distributions):
+    def stack_to_attack_point(self, total_troops, distributions):
         if self.plan is not None:
             group_counts = len(self.plan['groups'])
             equal_distribute = total_troops // group_counts
             for group in self.plan['groups']:
                 if group['from'] not in self.territories[self.id_me]:
-                        while group['from'] not in self.territories[self.id_me]:
-                            for g in self.plan["groups"]:
-                                if group['from'] in g['tgt']+g['target']:
-                                    group = g
+                    while group['from'] not in self.territories[self.id_me]:
+                        for g in self.plan["groups"]:
+                            if group['from'] in g['tgt']+g['target']:
+                                group = g
                 distributions[group['from']] += equal_distribute
                 total_troops -= equal_distribute
+                write_log(self.clock, 'Distribute', f"extra distributed {equal_distribute} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
+
             distributions[self.plan['groups'][0]['from']] += total_troops
+            write_log(self.clock, 'Distribute', f"extra distributed {total_troops} troops to territory {group['from']} for the attack_point by plan code {self.plan['code']}")
             total_troops -= total_troops
+
         else:
             total_troops, distributions =  self.distribute_troops_to_connected_border(total_troops, distributions)
 
@@ -1282,24 +1317,19 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     for pid in bot_state.id_all_player:
         bot_state.write_player_information(pid)
     bot_state.defend_my_continent()
-    write_log(bot_state.clock, 'Defend', f"{bot_state.threat_this_turn}, required {bot_state.troops_for_defend} to defend")
+    write_log(bot_state.clock, 'Defend', f"require {bot_state.troops_for_defend} to defend")
     
     # plan
     bot_state.plan_to_do()
     write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
     total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
-    if total_troops == 0:
-        return game.move_distribute_troops(query, distributions)
-
     # step 1 distribute remain troops in effective border
     # We will equally distribute across border territories in the early game,
-    if len(game.state.recording) < 1000:
-        total_troops, distributions = bot_state.distribute_troops_by_defending(total_troops, distributions)    
-    else:
-        # stack all my troops into one point
-        total_troops, distributions = bot_state.find_a_good_arena(total_troops, distributions)
+    # if len(game.state.recording) < 1000:
+    #     total_troops, distributions = bot_state.distribute_troops_by_defending(total_troops, distributions)    
+    # else:
+    #     # stack all my troops into one point
 
-    total_troops, distributions = bot_state.distribute_troops_to_connected_border(total_troops, distributions)
 
 
     return game.move_distribute_troops(query, distributions)
