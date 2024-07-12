@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.10'
+VERSION = '14.0.11'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -675,9 +675,9 @@ class BotState:
                     continue
                 
                 max_cand = max(cands, key=lambda x: self.state.territories[x].troops-distributions[x])
-                attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1 + assignable_troops
+                attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
                 enemy_adjacent_tgt_territories = a_minus_b(self.state.map.get_adjacent_to(tgt), self.territories[self.id_me])
-                if attack_troops < self.expect_faced_troops(enemy_adjacent_tgt_territories) + self.state.territories[tgt].troops:
+                if attack_troops + assignable_troops < self.expect_faced_troops(enemy_adjacent_tgt_territories) + self.state.territories[tgt].troops:
                     continue
 
                 diff = attack_troops - group['enemy_troops']
@@ -1099,7 +1099,6 @@ class BotState:
         
         return total_troops, distributions
 
-
     def distribute_troops_for_defending(self, total_troops, distributions):
         if len(self.threat_this_turn) == 0:
             return total_troops, distributions
@@ -1157,7 +1156,7 @@ class BotState:
         if self.plan is not None and self.plan['code'] == 6:
             pq = []
             for group in self.plan['groups']:
-                heapq.heappush(pq, (group['diff'], group['from']))
+                heapq.heappush(pq, (group['my_troops'] - group['enemy_troops'] - len(group['tgt']), group['from']))
             total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
             for territory, troops in record.items():
                 write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {troops} troops to territory {territory}")
@@ -1513,7 +1512,7 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
     if total_troops > 0:
         total_troops, distributions = bot_state.distribute_troops_for_killing(total_troops, distributions)
     if total_troops > 0:
-        total_troops, distributions = bot_state.distribute_troops_for_occupying(total_troops, distributions)
+        total_troops, distributions = bot_state.distribute_troops_for_end_game(total_troops, distributions)
     if total_troops > 0:
         total_troops, distributions = bot_state.distribute_troops_for_defending(total_troops, distributions)
     if total_troops > 0:
