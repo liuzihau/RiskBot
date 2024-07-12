@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.6'
+VERSION = '14.0.7'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -96,12 +96,12 @@ DIFF = {
 def defend_coefficient(enemy_troops):
     if 0 < enemy_troops < 3:
         return 2
-    elif enemy_troops < 6:
+    elif enemy_troops < 8:
         return 0
-    elif enemy_troops < 10:
-        return -int(enemy_troops * .25)
+    elif enemy_troops < 13:
+        return -int(enemy_troops * .2)
     else:
-        return -int(enemy_troops * .35)
+        return -int(enemy_troops * .3)
     
 def a_minus_b(a:list, b:list)->list:
     return list(set(a) - set(b))
@@ -982,7 +982,7 @@ class BotState:
             if cap_troops > 0:
                 distributions[self.plan['groups'][0]['from']] += cap_troops
                 cap_troops -= cap_troops
-                write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {cap_troops} troops to territory {group['from']}")
+                write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {cap_troops} troops to territory {self.plan['groups'][0]['from']}")
 
         return total_troops, distributions
 
