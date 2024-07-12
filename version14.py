@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '14.0.2'
+VERSION = '14.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -50,10 +50,10 @@ SECONDCONTINENT = {
 }
 
 PREFER = {
-    "AU": 0.0,
-    "SA": 0.0,
-    "NA": 0.0,
-    "AF": 0.0,
+    "AU": 0.02,
+    "SA": 0.03,
+    "NA": 0.01,
+    "AF": 0.02,
     "EU": 0.0,
     "AS": -0.5
     }
@@ -162,6 +162,19 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
     path.append(current)
     return path[::-1]
 
+def heap_helper(pq, total_troops, distributions):
+    k = max(1, total_troops // 8)
+    record = defaultdict(lambda: 0)
+    while total_troops > 0:
+        troops, gid = heapq.heappop(pq)
+        assign = min(total_troops, k)
+        distributions[gid] += assign
+        record[gid] += assign
+        heapq.heappush(pq, (troops + assign, gid))
+        total_troops -= assign
+        if total_troops == 0:
+            return total_troops, distributions, record
+    return total_troops, distributions, record
 
 class BotState:
     def __init__(self, state):
@@ -903,13 +916,9 @@ class BotState:
                                 if group['from'] in g['tgt']+g['target']:
                                     group = g
                     heapq.heappush(pq, (group['my_troops'], group['from']))
-                while total_troops > 0:
-                    troops, gid = heapq.heappop(pq)
-                    distributions[gid] += 1
-                    heapq.heappush(pq, (troops+1, gid))
-                    total_troops -= 1
-                    if total_troops == 0:
-                        break
+                total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+                write_log(self.clock, 'Distribute', f"extra distribute for code 3: {dict(record)}")
+
             elif self.plan['code'] == 0 and total_troops > 0:
                 total_troops, distributions = self.stack_to_attack_point(total_troops, distributions)
         
@@ -932,16 +941,8 @@ class BotState:
                 heapq.heappush(pq, (values['diff'], border))
         if len(pq) == 0:
             return total_troops, distributions
-        record = defaultdict(lambda: 0)
-        while total_troops > 0:
-            troops, border = heapq.heappop(pq)
-            distributions[border] += 1
-            record[border] += 1
-            heapq.heappush(pq, (troops+1, border))
-            total_troops -= 1
-            if total_troops == 0:
-                break
-        write_log(self.clock, 'Distribute', f"follow defending continent: {dict(record)}")
+        total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+        write_log(self.clock, 'Distribute', f"defending continent: {dict(record)}")
         return total_troops, distributions
 
     def distribute_troops_to_connected_border(self, total_troops, distributions):
@@ -952,13 +953,8 @@ class BotState:
         pq = []
         for border in borders:
             heapq.heappush(pq, (self.state.territories[border].troops, border))
-        while total_troops > 0:
-            troops, border = heapq.heappop(pq)
-            distributions[border] += 1
-            heapq.heappush(pq, (troops+1, border))
-            total_troops -= 1
-            if total_troops == 0:
-                break
+        total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+        write_log(self.clock, 'Distribute', f"put in connected border: {dict(record)}")
         return total_troops, distributions
     
     def stack_to_attack_point(self, total_troops, distributions):
