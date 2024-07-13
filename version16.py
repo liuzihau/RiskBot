@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '16.0.2'
+VERSION = '16.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -796,7 +796,7 @@ class BotState:
                 group['from'] = max_cand
                 group['to'] = tgt
                 break
-                
+            write_log(self.clock, "Rage attack", "plan to do {group}")
             if 'from' not in group and 'to' not in group:
                 group['have_path'] = False 
         
@@ -1598,6 +1598,10 @@ def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards
     # We always have to redeem enough cards to reduce our card count below five.
     card_sets: list[Tuple[CardModel, CardModel, CardModel]] = []
     cards_remaining = game.state.me.cards.copy()
+    
+    bot_state.update_status()
+    for pid in bot_state.id_all_player:
+        bot_state.write_player_information(pid)
 
     while len(cards_remaining) >= 5:
         card_set = game.state.get_card_set(cards_remaining)
@@ -1607,9 +1611,19 @@ def handle_redeem_cards(game: Game, bot_state: BotState, query: QueryRedeemCards
         card_sets.append(card_set)
         cards_remaining = [card for card in cards_remaining if card not in card_set]
 
+    # call the card earlier if we can twist the game
+    card_set = game.state.get_card_set(cards_remaining)
+    if game.state.card_sets_redeemed > 5 and card_set != None and query.cause == "turn_started":
+        extra_troops = (game.state.card_sets_redeemed - 3) * 5
+        enemy_troops = sum([bot_state.troops[pid] for pid in bot_state.troops if pid != bot_state.id_me])
+        surface_troops = bot_state.sum_up_troops(bot_state.border_territories)
+        if surface_troops + extra_troops - enemy_troops:
+            card_sets.append(card_set)
+            write_log(bot_state.clock, 'Redeem', f"redeem early since extra troops {enemy_troops} plus the troops in borders({surface_troops}) can help beat enemy with ttl troops {enemy_troops}")
+
     # Remember we can't redeem any more than the required number of card sets if 
     # we have just eliminated a player.
-    if game.state.card_sets_redeemed > 12 and query.cause == "turn_started":
+    elif game.state.card_sets_redeemed > 12 and query.cause == "turn_started":
         card_set = game.state.get_card_set(cards_remaining)
         while card_set != None:
             card_sets.append(card_set)
