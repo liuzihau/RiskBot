@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.4'
+VERSION = '15.0.5'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -528,7 +528,7 @@ class BotState:
         plan = {
             "code": 6,
             "name": None,
-            "reward": 99999999,
+            "reward": 100,
             "groups": [],
             "cost": cost,
             "diff": diff,
@@ -715,6 +715,7 @@ class BotState:
             group['enemy_troops'] = self.sum_up_troops(group['tgt'])
         plan['groups'] = sorted(plan['groups'], key=lambda x:x['enemy_troops'], reverse=True)
         for group in plan['groups']:
+            group['tgt'] = sorted(group['tgt'], key=lambda x:self.state.territories[x].troops, reverse=True)
             for tgt in group['tgt']:
                 sub_set = a_minus_b(group['tgt'], [tgt])
                 if len(sub_set) != 0 and len(group_connected_territories(sub_set, self.state)) > 1:
@@ -852,7 +853,7 @@ class BotState:
 
         # write_log(self.clock, 'Debug Path', f"final group {groups}")
         return groups
-        
+    
     def dijkstra(self, src: int, targets: list, enemy_territories, allocated_troops) -> tuple:
         # Initialize the priority queue
         pq = []
@@ -1263,19 +1264,25 @@ class BotState:
         other_enemy = 0
         for group in self.plan['groups']:
             if group['from'] == src and group['to'] == tgt:
-                enemy_territories = a_minus_b(group['tgt'], [tgt]) + group['target']
+                enemy_territories = a_minus_b(a_or_b(group['tgt'], group['target']), [tgt])
                 target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
             elif group['from'] == src:
-                enemy_territories = group['tgt'] + group['target']
+                enemy_territories = a_or_b(group['tgt'], group['target'])
                 other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
 
         if other_enemy == 0:
             write_log(self.clock, "AfterAttack", f"no sharing src with other attack plan move all troops {max_troops - 1}")
             return max_troops - 1
+        
+        if target_enemy == 0:
+            if tgt in self.border_territories:
+                return max_troops - 1
+            else:
+                return min_troops
         idle_troops = max_troops - target_enemy - other_enemy - 1
         ratio = target_enemy / (target_enemy + other_enemy)
-        smothing_ratio = ratio * (2/3) + 0.5 * (1/3)
-        portion_troops = int(idle_troops * smothing_ratio)
+        smoothing_ratio = ratio * (2/3) + 0.5 * (1/3)
+        portion_troops = int(idle_troops * smoothing_ratio)
         if idle_troops > 0:
             write_log(self.clock, "AfterAttack", f"sharing src with other attack plan with extra {idle_troops} troops, moving {max(min_troops, target_enemy + idle_troops // 2 - 1)}")
             return max(min_troops, target_enemy + portion_troops - 1)
