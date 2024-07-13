@@ -41,10 +41,10 @@ CONTINENT = {
     "AS": [20, 27, 21, 25, 26, 19, 23, 17, 24, 18, 22, 16]
     }
 SECONDCONTINENT = {
-    "AU":["AS"],
-    "SA":["AF", "NA"],
-    "AF":["EU", "SA"],
-    "EU":["AF", "NA"],
+    "AU":["AS", "AF"],
+    "SA":["AF", "NA", "EU"],
+    "AF":["EU", "SA", "NA"],
+    "EU":["AF", "NA", "SA"],
     "NA":["AF", "EU"],
     "AS":["AU", "NA", "AF", "EU"]
 }
@@ -54,9 +54,10 @@ PREFER = {
     "SA": 0.03,
     "NA": 0.01,
     "AF": 0.02,
-    "EU": 0.0,
+    "EU": 0.1,
     "AS": -0.5
     }
+
 
 DOOR = {
     "AU": [40],
@@ -348,7 +349,7 @@ class BotState:
                 if self.threat_this_turn[key]['diff'] < 0:
                     defend_needed = True
                     break
-        economy_edge = self.economy[self.id_me] > 4 and self.state.card_sets_redeemed > 4 and not defend_needed
+        economy_edge = self.economy[self.id_me] > 4 and not defend_needed
         if economy_edge and self.state.me.troops_remaining > 0: # means I hold continent in beginning or I kill one player
             if self.approve_infinity_fire():
                 plan = self.occupy_the_world()
