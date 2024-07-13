@@ -1284,6 +1284,13 @@ class BotState:
                 return max_troops - 1
             else:
                 return min_troops
+        
+        if target_enemy + other_enemy == 0:
+            if tgt in self.border_territories:
+                return max_troops - 1
+            else:
+                return min_troops
+            
         idle_troops = max_troops - target_enemy - other_enemy - 1
         ratio = target_enemy / (target_enemy + other_enemy)
         smoothing_ratio = ratio * (2/3) + 0.5 * (1/3)
