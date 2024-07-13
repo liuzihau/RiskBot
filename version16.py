@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '16.0.0'
+VERSION = '16.0.1'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -244,15 +244,7 @@ class BotState:
     def is_end_game(self):
         alive_players = sum([int(self.state.players[p].alive) for p in self.state.players])
         return alive_players == 2 or self.troops_ratio > 0.45
-    
-    def approve_infinity_fire(self):
-        if self.is_end_game():
-            return True
-
-        middle_game_criteria = 0.45
-        middle_game_condition = self.troops_ratio > middle_game_criteria and 500 <= self.clock < 1500
-        return middle_game_condition
-    
+        
     def update_status(self):
         self.construct_player_id()
         self.get_overall_player_status()
@@ -345,7 +337,7 @@ class BotState:
                 self.plan = occupy_plan_list[0]
                 return
 
-        # step 5 try end the game
+        # step 5 try stack the army
         defend_needed = False
         for key in self.threat_this_turn:
             if self.threat_this_turn[key]['is_door']:
@@ -391,6 +383,50 @@ class BotState:
             self.plan = minimum_attack_plan
 
         return
+
+    def plan_to_end(self):
+        # Attack is all you need
+        # step 0 check if last run is killing player, if so, keep killing
+        write_log(self.clock, 'End game', 'Below plan is end game plan')
+        tried_kill = False
+        if self.plan is not None and self.plan['code'] == 3:
+            kill_plan_list = self.kill_player(self.plan['pid'])
+            tried_kill = True
+            if kill_plan_list is not None:
+                self.plan = kill_plan_list[0]
+                return
+        
+        # step 1 reset plan
+        self.plan = None
+        self.troops_for_defend = 0
+        self.threat_this_turn = {}
+
+        # step 2 try kill player 
+        kill_plan_list = None if tried_kill else self.kill_player()
+        if kill_plan_list is not None:
+            self.plan = kill_plan_list[0]
+            return
+
+        # step 3 try interupt other players' continent
+        interupt_plan_list = self.interupt_opponunt_continent()
+        if interupt_plan_list is not None:
+            self.plan = interupt_plan_list[0]
+            return
+
+        # step 4 try occupy continent
+        occupy_plan_list = self.occupy_new_continent()
+        write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
+        if occupy_plan_list is not None:
+            if occupy_plan_list[0]['diff'] - 0.4 * occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
+                self.add_continent_item_into_threat_list(occupy_plan_list[0])
+                self.plan = occupy_plan_list[0]
+                return
+
+        # step 5 try end the game
+        self.plan = self.occupy_the_world()
+
+        return
+
 
     def get_defending_continent_proposal(self):
         if self.plan is not None and self.plan['code'] == 1:
@@ -740,8 +776,7 @@ class BotState:
                 
                 max_cand = max(cands, key=lambda x: self.state.territories[x].troops-distributions[x])
                 attack_troops = self.state.territories[max_cand].troops - distributions[max_cand] - 1
-                enemy_adjacent_tgt_territories = a_minus_b(self.state.map.get_adjacent_to(tgt), self.territories[self.id_me])
-                if attack_troops + assignable_troops < self.expect_faced_troops(enemy_adjacent_tgt_territories) + self.state.territories[tgt].troops:
+                if attack_troops + assignable_troops < 3:
                     continue
 
                 diff = attack_troops - group['enemy_troops']
@@ -1215,13 +1250,17 @@ class BotState:
         return total_troops, distributions
 
     def distribute_troops_for_end_game(self, total_troops, distributions):
-        if self.plan is not None and self.plan['code'] == 6:
-            pq = []
-            for group in self.plan['groups']:
-                heapq.heappush(pq, (group['my_troops'] - group['enemy_troops'] - len(group['tgt']), group['from']))
-            total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
-            for territory, troops in record.items():
-                write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {troops} troops to territory {territory}")
+        if self.plan is not None and self.is_end_game():
+            if self.plan['code'] in [0, 1, 3]:
+                pq = []
+                for group in self.plan['groups']:
+                    heapq.heappush(pq, (group['my_troops'] - group['enemy_troops'] - len(group['tgt']), group['from']))
+                total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+                for territory, troops in record.items():
+                    write_log(self.clock, 'Distribute', f"distributed by plan extra (code {self.plan['code']}), put {troops} troops to territory {territory}")
+            else:
+                distributions[self.plan['groups'][0]['from']] += total_troops
+                total_troops -= total_troops
         return total_troops, distributions
 
 
@@ -1602,7 +1641,10 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
         bot_state.write_player_information(pid)
     
     # plan
-    bot_state.plan_to_do()
+    if bot_state.is_end_game():
+        bot_state.plan_to_end()
+    else:
+        bot_state.plan_to_do()
     write_log(bot_state.clock, "Distribute", f"follow plan {bot_state.plan}")
     write_log(bot_state.clock, "Distribute", f"total troops for distribute {total_troops}")
     total_troops, distributions = bot_state.distribute_troops_by_plan(total_troops, distributions)
@@ -1628,11 +1670,17 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     bot_state.update_status()
     last_record = game.state.recording[-1]
     if last_record.record_type == 'move_troops_after_attack':
-        bot_state.plan_to_do()
+        if bot_state.is_end_game():
+            bot_state.plan_to_end()
+        else:
+            bot_state.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
         bot_state.update_plan()
-        if bot_state.plan is None and not bot_state.got_territoty_this_turn:
-            bot_state.plan_to_do()
+        if bot_state.plan is None:
+            if bot_state.is_end_game():
+                bot_state.plan_to_end()
+            elif not bot_state.got_territoty_this_turn:
+                bot_state.plan_to_do()
     write_log(bot_state.clock, 'Attack', f"plan: {bot_state.plan}")
     information = bot_state.attack_by_plan()
     if information is not None:
