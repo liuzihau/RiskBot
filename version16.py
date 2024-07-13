@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '16.0.1'
+VERSION = '16.0.2'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -306,7 +306,7 @@ class BotState:
     def plan_to_do(self):
         # step 0 check if last run is killing player, if so, keep killing
         tried_kill = False
-        if self.plan is not None and self.plan['code'] == 3:
+        if self.plan is not None and self.plan['code'] == 3 and self.state.players[self.plan['pid']].alive:
             kill_plan_list = self.kill_player(self.plan['pid'])
             tried_kill = True
             if kill_plan_list is not None:
@@ -389,7 +389,7 @@ class BotState:
         # step 0 check if last run is killing player, if so, keep killing
         write_log(self.clock, 'End game', 'Below plan is end game plan')
         tried_kill = False
-        if self.plan is not None and self.plan['code'] == 3:
+        if self.plan is not None and self.plan['code'] == 3 and self.state.players[self.plan['pid']].alive:
             kill_plan_list = self.kill_player(self.plan['pid'])
             tried_kill = True
             if kill_plan_list is not None:
@@ -417,8 +417,7 @@ class BotState:
         occupy_plan_list = self.occupy_new_continent()
         write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
         if occupy_plan_list is not None:
-            if occupy_plan_list[0]['diff'] - 0.4 * occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
-                self.add_continent_item_into_threat_list(occupy_plan_list[0])
+            if occupy_plan_list[0]['diff'] - 0.3 * occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
                 self.plan = occupy_plan_list[0]
                 return
 
@@ -589,6 +588,7 @@ class BotState:
                 {
                     "src":border_territories,
                     "tgt":enemy_group,
+                    "have_path": True
                     }
             )
         plan = self.stack_and_attack(plan)
@@ -796,11 +796,13 @@ class BotState:
                 group['from'] = max_cand
                 group['to'] = tgt
                 break
-
-            if 'from' not in group or 'to' not in group:
-                return None
+                
+            if 'from' not in group and 'to' not in group:
+                group['have_path'] = False 
         
-        return plan
+        plan['groups'] = [group for group in plan['groups'] if group['have_path']]
+        if len(plan['groups']) > 0:
+            return plan
     
     def kill_player(self, target=None):
         target_list = [target] if target is not None else self.ids_others

@@ -1533,7 +1533,7 @@ def handle_attack(game: Game, bot_state: BotState, query: QueryAttack) -> Union[
     territory. If you eliminated a player you will get a move to redeem cards and then distribute troops.
     """
     bot_state.update_status()
-    last_record = cast(RecordAttack, game.state.recording)[-1]
+    last_record = game.state.recording[-1]
     if last_record.record_type == 'move_troops_after_attack':
         bot_state.plan_to_do()
     elif last_record.record_type != 'move_distribute_troops':
