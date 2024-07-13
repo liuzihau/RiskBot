@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.10'
+VERSION = '15.0.11'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -337,7 +337,7 @@ class BotState:
         occupy_plan_list = self.occupy_new_continent()
         write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
         if occupy_plan_list is not None:
-            if occupy_plan_list[0]['diff'] - occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
+            if occupy_plan_list[0]['diff'] - 0.4 * occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
                 self.add_continent_item_into_threat_list(occupy_plan_list[0])
                 self.plan = occupy_plan_list[0]
                 return
@@ -804,8 +804,7 @@ class BotState:
                     total_diff += group_plan["my_troops"] - group_plan["enemy_troops"] - len(group_plan["tgt"]) - len(group_plan['target']) + 2
                 plan['cost'] = total_cost
                 plan['diff'] = total_diff
-                if total_diff > 2:
-                    plan_list.append(plan)
+                plan_list.append(plan)
             
         if len(plan_list) > 0:
             plan_list = sorted(plan_list, key=lambda x:x['diff'], reverse=True)
