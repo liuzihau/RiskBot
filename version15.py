@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.1'
+VERSION = '15.0.3'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -247,8 +247,7 @@ class BotState:
         elif alive_players > 2:
             middle_game_criteria = 0.45
         middle_game_condition = troops_ratio > middle_game_criteria and 500 <= self.clock < 1500
-        #end_game_condition = self.clock >= 1500
-        return middle_game_condition# or end_game_condition
+        return middle_game_condition
     
     def update_status(self):
         self.construct_player_id()
@@ -331,38 +330,27 @@ class BotState:
         self.update_defending_troops()
         write_log(self.clock, 'Defend', f"require {self.troops_for_defend} to defend ({self.threat_this_turn})")
 
+        # step 4 try occupy continent
+        occupy_plan_list = self.occupy_new_continent()
+        write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
+        if occupy_plan_list is not None:
+            if occupy_plan_list[0]['diff'] - occupy_plan_list[0]['defend_difficulty'] > 0 and occupy_plan_list[0]['have_path']:
+                self.add_continent_item_into_threat_list(occupy_plan_list[0])
+                self.plan = occupy_plan_list[0]
+                return
 
-        # step 4 try end the game
-        economy_edge = self.economy[self.id_me] > 5
-        if economy_edge and self.troops_can_distribute() > 0: # means I hold continent in beginning or I kill one player
+        # step 5 try end the game
+        economy_edge = self.economy[self.id_me] > 4
+        if economy_edge and self.state.me.troops_remaining > 0: # means I hold continent in beginning or I kill one player
             if self.approve_infinity_fire():
                 plan = self.occupy_the_world()
                 if plan is not None:
                     self.plan = plan
-                    return 
-            else:
-                plan = self.stacking_my_army()
-                if plan is not None:
-                    self.plan = plan
                     return
-
-
-        # step 5 try occupy continent
-        occupy_plan_list = self.occupy_new_continent()
-        write_log(self.clock, 'Occupy debug', f"{occupy_plan_list}")
-        if occupy_plan_list is not None:
-            if occupy_plan_list[0]['diff'] - occupy_plan_list[0]['defend_difficulty'] > 0:
-                for d, v in occupy_plan_list[0]['proposal_threat'].items():
-                    if d in self.threat_this_turn:
-                        continue
-                    self.threat_this_turn[d] = {
-                        'my_troops': 0,
-                        'enemy_troops': v,
-                        'diff': -v,
-                        "is_door": True,
-                        "currently_hold": False
-                    }
-                self.plan = occupy_plan_list[0]
+            pre_plan = occupy_plan_list[0] if occupy_plan_list is not None else None
+            plan = self.stacking_my_army(pre_plan)
+            if plan is not None:
+                self.plan = plan
                 return
 
         # step 6 try interupt other players' continent
@@ -465,7 +453,8 @@ class BotState:
                 "defend_difficulty": defend_difficulty,
                 "my_territories": ttl_my_reachable_territories,
                 "border_territories": ttl_border_territories,
-                "proposal_threat": proposal_threat
+                "proposal_threat": proposal_threat,
+                "have_path":True
                 }
             enemy_groups = self.get_sorted_connected_group(enemy_territories)
             for enemy_group in enemy_groups:
@@ -486,9 +475,12 @@ class BotState:
             return plan_list
         return
     
-    def stacking_my_army(self):
-        # find the borders connect to the largest enemy groups
-        enemy_groups = group_connected_territories(a_minus_b(WHOLEMAP, self.territories[self.id_me]), self.state)
+    def stacking_my_army(self, occupry_plan=None):
+        if occupry_plan is None:
+            # find the borders connect to the largest enemy groups
+            enemy_groups = group_connected_territories(a_minus_b(WHOLEMAP, self.territories[self.id_me]), self.state)
+        else:
+            enemy_groups = [group['tgt'] for group in occupry_plan['groups']]
         target_group = max(enemy_groups, key=lambda x: self.sum_up_troops(x))
         # find the max territory among the border
         my_borders_to_the_group = a_and_b(self.state.get_all_adjacent_territories(target_group), self.border_territories)
@@ -497,7 +489,7 @@ class BotState:
             adj_territories = a_minus_b(self.state.map.get_adjacent_to(src), self.territories[self.id_me])
             tgt = min(adj_territories, key=lambda x: self.state.territories[x].troops)
             difficulty = max(adj_territories, key=lambda x: self.state.territories[x].troops)
-            if self.state.territories[src].troops + self.troops_can_distribute() > self.state.territories[tgt].troops:
+            if self.state.territories[src].troops + self.state.me.troops_remaining > self.state.territories[tgt].troops:
                 plan = {
                 "code": 7,
                 "name": None,
@@ -519,7 +511,6 @@ class BotState:
                 }
                 write_log(self.clock, 'Stack', f"stack army at {plan['groups'][0]['from']} and will attack {plan['groups'][0]['to']}, plan: {plan}")
                 return plan
-
 
     def occupy_the_world(self):
         enemy_territories = a_minus_b(WHOLEMAP, self.territories[self.id_me])
@@ -655,18 +646,21 @@ class BotState:
                             assigned_troops = min((K-diff+1), assignable_troops)
                         else:
                             assigned_troops = 0
-                        if diff + assigned_troops >= K:
-                            if 'assign_troops' not in group:
-                                group['assign_troops'] = 0
-                            
-                            plan['diff'] += assigned_troops
-                            group['assign_troops'] += assigned_troops
-                            assignable_troops -= assigned_troops
-                            distributions[max_cand] += (attack_troops + assigned_troops)
-                            group['my_troops'] = self.state.territories[max_cand].troops
-                            group['from'] = max_cand
-                            group['to'] = tgt
-                            break
+
+                        if diff + assigned_troops < K:
+                            continue
+                        
+                        if 'assign_troops' not in group:
+                            group['assign_troops'] = 0
+                        
+                        plan['diff'] += assigned_troops
+                        group['assign_troops'] += assigned_troops
+                        assignable_troops -= assigned_troops
+                        distributions[max_cand] += (attack_troops + assigned_troops)
+                        group['my_troops'] = self.state.territories[max_cand].troops
+                        group['from'] = max_cand
+                        group['to'] = tgt
+                        break
 
                     if outer_cands:
                         max_cand = max(outer_cands, key=lambda x: self.state.territories[x].troops-distributions[x])
@@ -692,9 +686,21 @@ class BotState:
                         group['to'] = tgt
                         break
             if 'from' not in group or 'to' not in group:
-                return None
+                plan['have_path'] = False
         return plan
     
+    def add_continent_item_into_threat_list(self, plan):
+        for d, v in plan['proposal_threat'].items():
+            if d in self.threat_this_turn:
+                continue
+            self.threat_this_turn[d] = {
+                'my_troops': 0,
+                'enemy_troops': v,
+                'diff': -v,
+                "is_door": True,
+                "currently_hold": False
+            } 
+
     def stack_and_attack(self, plan):
         K = 1
         assignable_troops = self.state.me.troops_remaining
@@ -1015,11 +1021,12 @@ class BotState:
     def check_continent_occupy_risk(self):
         risk_list = []
         for pid in self.ids_others:
-            for name in ['AU', 'SA', 'AF']:
+            for name in ['AU', 'SA', 'AF', 'EU', 'NA']:
                 pr_current = get_percentage_to_continent(self.territories[pid], name)
                 pr_potential = get_percentage_to_continent(self.territories[None], name)
-                if pr_current + pr_potential >= 0.9 and pr_current > 0.61:
+                if pr_current + pr_potential >= 0.9 and pr_current > 0.71:
                     risk_list.append((name, pr_current+pr_potential))
+            
         return risk_list
     
     def search_preferred_continent(self):
@@ -1218,10 +1225,11 @@ class BotState:
     def valid_attack(self):
         if self.plan is None:
             return False
-        src = self.plan['groups'][0]['from']
-        tgt = self.plan['groups'][0]['to']
-        if self.state.territories[src].troops > self.state.territories[tgt].troops:
-            return True
+        if 'from' in self.plan['groups'][0] and 'to' in self.plan['groups'][0]:
+            src = self.plan['groups'][0]['from']
+            tgt = self.plan['groups'][0]['to']
+            if self.state.territories[src].troops > self.state.territories[tgt].troops:
+                return True
         return False
     
     def attack_by_plan(self):
@@ -1313,7 +1321,7 @@ class BotState:
         if self.plan is None:
             return self.put_troops_on_border(src, tgt, max_troops, min_troops)
         if src in self.border_territories:
-            return min(max_troops, 3)
+            return min(max_troops - 1, 3)
         else:
             return max_troops - 1
         
