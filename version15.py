@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.8'
+VERSION = '15.0.9'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -618,7 +618,7 @@ class BotState:
         return
 
     def find_good_attack_source_and_target(self, plan):
-        K = 1
+        K = 2
         assignable_troops = self.troops_can_distribute()
         if plan['diff'] + assignable_troops < 1:
             return
