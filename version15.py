@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.11'
+VERSION = '15.0.12'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -711,7 +711,9 @@ class BotState:
                 "is_door": True,
                 "currently_hold": False
             }
-        new_safe_list = a_minus_b(CONTINENT[plan['name']], DOOR[plan['name']])
+        step1 = a_or_b(CONTINENT[plan['name']], self.territories[self.id_me])
+        step2 = self.state.get_all_border_territories(step1)
+        new_safe_list = a_minus_b(step1, step2)
         key_list = list(self.threat_this_turn.keys())
         for d in key_list:
             if d in new_safe_list:
