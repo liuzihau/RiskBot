@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.6'
+VERSION = '15.0.7'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -694,7 +694,6 @@ class BotState:
     def add_continent_item_into_threat_list(self, plan):
         for d, v in plan['proposal_threat'].items():
             if d in self.threat_this_turn:
-                self.threat_this_turn.pop(d)
                 continue
             self.threat_this_turn[d] = {
                 'my_troops': 0,
@@ -702,7 +701,12 @@ class BotState:
                 'diff': -v,
                 "is_door": True,
                 "currently_hold": False
-            } 
+            }
+        new_safe_list = a_minus_b(CONTINENT[plan['name']], DOOR[plan['name']])
+        key_list = list(self.threat_this_turn.keys())
+        for d in key_list:
+            if d in new_safe_list:
+                self.threat_this_turn.pop(d)
 
     def stack_and_attack(self, plan):
         K = 1
