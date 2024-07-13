@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.9'
+VERSION = '15.0.10'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -36,7 +36,7 @@ CONTINENT = {
     "AU": [38, 39, 41, 40],
     "SA": [28, 31, 29, 30],
     "AF": [35, 37, 32, 33, 36, 34],
-    "EU": [12, 10, 9, 15, 13, 14, 11],
+    "EU": [11, 12, 10, 9, 15, 13, 14],
     "NA": [2, 3, 8, 7, 6, 1, 4, 5, 0],
     "AS": [20, 27, 21, 25, 26, 19, 23, 17, 24, 18, 22, 16]
     }
@@ -241,18 +241,19 @@ class BotState:
                 self.economy[pid] = self.sum_up_troops_get_next_turn(pid) 
     
     def approve_infinity_fire(self):
-        troops_ratio = (self.troops[self.id_me] + self.troops_can_distribute()) / sum(self.troops.values())
         alive_players = sum([int(self.state.players[p].alive) for p in self.state.players])
         if alive_players == 2:
             middle_game_criteria = 0.51
         elif alive_players > 2:
             middle_game_criteria = 0.45
-        middle_game_condition = troops_ratio > middle_game_criteria and 500 <= self.clock < 1500
+        middle_game_condition = self.troops_ratio > middle_game_criteria and 500 <= self.clock < 1500
         return middle_game_condition
     
     def update_status(self):
         self.construct_player_id()
         self.get_overall_player_status()
+        
+        self.troops_ratio = 1 if sum(self.troops.values()) == 0 else (self.troops[self.id_me] + self.troops_can_distribute()) / sum(self.troops.values())
         self.adjacent_territories = self.state.get_all_adjacent_territories(self.territories[self.id_me])
         self.border_territories = self.state.get_all_border_territories(self.territories[self.id_me])
     
@@ -341,7 +342,13 @@ class BotState:
                 return
 
         # step 5 try end the game
-        economy_edge = self.economy[self.id_me] > 4
+        defend_needed = False
+        for key in self.threat_this_turn:
+            if self.threat_this_turn[key]['is_door']:
+                if self.threat_this_turn[key]['diff'] < 0:
+                    defend_needed = True
+                    break
+        economy_edge = self.economy[self.id_me] > 4 and self.state.card_sets_redeemed > 4 and not defend_needed
         if economy_edge and self.state.me.troops_remaining > 0: # means I hold continent in beginning or I kill one player
             if self.approve_infinity_fire():
                 plan = self.occupy_the_world()
