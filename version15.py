@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.12'
+VERSION = '15.0.13'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -1280,7 +1280,12 @@ class BotState:
         for group in self.plan['groups']:
             if group['from'] == src and group['to'] == tgt:
                 enemy_territories = a_minus_b(a_or_b(group['tgt'], group['target']), [tgt])
-                target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+                new_groups = group_connected_territories(enemy_territories, self.state)
+                if len(new_groups) == 2:
+                    target_enemy += self.sum_up_troops(new_groups[0]) + len(new_groups[0]) - 1
+                    other_enemy += self.sum_up_troops(new_groups[1]) + len(new_groups[1]) - 1
+                else:
+                    target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
             elif group['from'] == src:
                 enemy_territories = a_or_b(group['tgt'], group['target'])
                 other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
