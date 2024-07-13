@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.3'
+VERSION = '15.0.4'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -386,6 +386,8 @@ class BotState:
         return
 
     def get_defending_continent_proposal(self):
+        if self.plan is not None and self.plan['code'] == 1:
+            return
         self.threat_this_turn = {}
         continents = self.continent_owned_by[self.id_me]
         groups = self.get_sorted_connected_group(self.territories[self.id_me])
@@ -692,7 +694,7 @@ class BotState:
     def add_continent_item_into_threat_list(self, plan):
         for d, v in plan['proposal_threat'].items():
             if d in self.threat_this_turn:
-                continue
+                self.threat_this_turn.pop(d)
             self.threat_this_turn[d] = {
                 'my_troops': 0,
                 'enemy_troops': v,
@@ -922,8 +924,6 @@ class BotState:
             plan['groups'] = groups
             plan['cost'] = plan['groups'][0]["enemy_troops"]
             plan['diff'] = plan['groups'][0]["my_troops"] - plan['groups'][0]["enemy_troops"] - len(plan['groups'][0]["tgt"]) + 1
-            # if plan['groups'][0]['from'] in self.threat_this_turn:
-            #     plan['diff'] -= self.threat_this_turn[plan['groups'][0]['from']]['enemy_troops']
             
             write_log(self.clock, 'Interupt Debug', f"target: {name}, path: {plan}")
             if plan['diff'] > 2 and plan['cost'] < self.troops[self.id_me] / 3:
