@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.5'
+VERSION = '15.0.6'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -695,6 +695,7 @@ class BotState:
         for d, v in plan['proposal_threat'].items():
             if d in self.threat_this_turn:
                 self.threat_this_turn.pop(d)
+                continue
             self.threat_this_turn[d] = {
                 'my_troops': 0,
                 'enemy_troops': v,
