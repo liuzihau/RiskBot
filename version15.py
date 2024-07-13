@@ -27,7 +27,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '15.0.7'
+VERSION = '15.0.8'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -181,15 +181,16 @@ def find_shortest_path_from_vertex_to_vertex_via_group(state, source: int, targe
     path.append(current)
     return path[::-1]
 
-def heap_helper(pq, total_troops, distributions):
+def heap_helper(pq, total_troops, distributions, greedy=True):
     k = max(1, total_troops // 8)
     record = defaultdict(lambda: 0)
-    while total_troops > 0:
+    while total_troops > 0 and len(pq) > 0:
         troops, gid = heapq.heappop(pq)
         assign = min(total_troops, k)
         distributions[gid] += assign
         record[gid] += assign
-        heapq.heappush(pq, (troops + assign, gid))
+        if greedy or troops + assign <0:
+            heapq.heappush(pq, (troops + assign, gid))
         total_troops -= assign
         if total_troops == 0:
             return total_troops, distributions, record
@@ -1166,7 +1167,7 @@ class BotState:
                 heapq.heappush(pq, (values['diff'], border))
         if len(pq) == 0:
             return total_troops, distributions
-        total_troops, distributions, record = heap_helper(pq, total_troops, distributions)
+        total_troops, distributions, record = heap_helper(pq, total_troops, distributions, False)
         for territory, troops in record.items():
             write_log(self.clock, 'Distribute', f"distributed by defending, put {troops} troops to territory {territory}")
         return total_troops, distributions
