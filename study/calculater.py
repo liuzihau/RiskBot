@@ -75,15 +75,26 @@ def test_situation2():
     atk_remain = 0
     def_remain = 0
     test_count = 100000
-    attacker = 51
-    defender = 142
+    attacker = 14
+    defender = 14
     for _ in range(test_count):
         a , d = situation(attacker, defender, True)
         atk_remain += a
         def_remain += d
     return atk_remain / test_count - attacker, def_remain / test_count - defender
+
+def test_situation3():
+    atk_win = 0
+    count = 0
+    test_count = 10000
+    attacker = 16
+    defender = 10
+    for _ in range(test_count):
+        a , d = situation(attacker, defender, True)
+        # print(a, d)
+        if d == 0:
+            atk_win += 1
+        count += 1
+    return atk_win / count
 if __name__ == "__main__":
-    # test_probability(1, 2)
-    # print(situation(10, 3))
-    # print(test_situation())
-    print(test_situation2())
+    print(test_situation3())

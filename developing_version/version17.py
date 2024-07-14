@@ -815,11 +815,15 @@ class BotState:
             write_log(self.clock, 'Kill Overview', f"[Player {pid}] card_redeemed: {self.state.card_sets_redeemed}, enemy_hand_card: {self.state.players[pid].card_count}, enemy_troops: {enemy_troops}, enemy_territories: {len(self.territories[pid])}, my_troops: {my_troops}")
             if troops_edge < 5:
                 continue
+            if self.state.card_sets_redeemed > 5:
+                reward = (self.state.card_sets_redeemed - 3) * self.state.players[pid].card_count * 5 / 3
+            else:
+                reward = self.state.card_sets_redeemed * self.state.players[pid].card_count * 2 / 3 + 2
             plan = {
                 'code':3, 
                 'name':None,
                 'pid': pid,
-                'reward': (self.state.card_sets_redeemed - 3) * self.state.players[pid].card_count * 1.5,
+                'reward': reward,
                 'groups':[],
                 'my_territories': self.territories[self.id_me], 
                 'border_territories': self.border_territories
@@ -851,6 +855,14 @@ class BotState:
         target_groups = group_connected_territories(self.territories[target_id], self.state)
         return self.find_shortest_cost_from_group_to_group(self.border_territories, target_groups, enemy_territories)
 
+    def get_prob_criteria(self, my_troops, enemy_troops):
+        if self.ahead():
+            # give prob > 90% 
+            pass
+        else:
+            # give prob > 75%
+            pass
+
     def find_shortest_cost_from_group_to_group(self, srcs: list, targets: list, enemy_territories, criteria=3) -> Union[list[int], None]:
         groups = []
         assignable_troops = self.troops_can_distribute()
@@ -872,14 +884,16 @@ class BotState:
                         "target":target
                                 }
                 )
-            chosen_paths = sorted(paths, key=lambda x:(len(x['tgt']), x['enemy_troops'] - x['my_troops']))
+            chosen_paths = sorted(paths, key=lambda x:(len(x['tgt']), x['enemy_troops'] - x['my_troops'] - - allocated_troops[x['from']]))
             chosen_path = None
             while len(chosen_paths) > 0:
                 cand = chosen_paths.pop(0)
                 for tid in a_minus_b(cand['target'], [cand['to']]):
                     cand["enemy_troops"] += self.state.territories[tid].troops
                 my_active_troops = assignable_troops + cand['my_troops'] - allocated_troops[cand['from']] - 1
-                minimum_needed_troops = cand['enemy_troops'] + len(cand['tgt'])
+                minimum_needed_troops = cand['enemy_troops'] + len(a_or_b(cand['tgt'], cand['target'])) - 1 # the last territory shouldn't be count
+                if minimum_needed_troops == 1:
+                    criteria = 2
                 if my_active_troops - minimum_needed_troops > criteria:
                     chosen_path = cand
                     break
