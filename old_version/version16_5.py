@@ -26,7 +26,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '16.0.4'
+VERSION = '16.0.5'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -49,7 +49,7 @@ SECONDCONTINENT = {
 }
 
 PREFER = {
-    "AU": 0.02,
+    "AU": 0.15,
     "SA": 0.03,
     "NA": 0.01,
     "AF": 0.02,
