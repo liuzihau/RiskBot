@@ -1,5 +1,4 @@
 from collections import defaultdict, deque
-import random
 from typing import Optional, Tuple, Union, cast
 from risk_helper.game import Game
 from risk_shared.models.card_model import CardModel
@@ -27,7 +26,7 @@ from risk_shared.records.types.move_type import MoveType
 
 import heapq
 
-VERSION = '16.0.3'
+VERSION = '16.0.4'
 DEBUG = True
 
 WHOLEMAP = [i for i in range(42)]
@@ -1319,15 +1318,40 @@ class BotState:
         for group in self.plan['groups']:
             if group['from'] == src and group['to'] == tgt:
                 enemy_territories = a_minus_b(a_or_b(group['tgt'], group['target']), [tgt])
-                new_groups = group_connected_territories(enemy_territories, self.state)
-                if len(new_groups) == 2:
-                    target_enemy += self.sum_up_troops(new_groups[0]) + len(new_groups[0]) - 1
-                    other_enemy += self.sum_up_troops(new_groups[1]) + len(new_groups[1]) - 1
-                else:
-                    target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+                # new_groups = group_connected_territories(enemy_territories, self.state)
+                # if len(new_groups) == 2:
+                #     # new_group = new_groups[0]
+                #     # adj_to_first_group = self.state.get_all_adjacent_territories(new_group)
+                #     # my_borders = a_and_b(adj_to_first_group, self.border_territories)
+                #     # my_borders = a_minus_b(my_borders, [src, tgt])
+                #     # enemy_troops = self.sum_up_troops(new_group)
+                #     # my_troops = self.sum_up_troops(my_borders)
+                #     # cost = enemy_troops + len(new_group) - 1 # the last one doesn't count
+                #     # diff = my_troops - cost - len(my_borders)
+
+
+                #     target_enemy += self.sum_up_troops(new_groups[0]) + len(new_groups[0]) - 1
+                #     other_enemy += self.sum_up_troops(new_groups[1]) + len(new_groups[1]) - 1 #TODO bug
+                # else:
+                target_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
             elif group['from'] == src:
                 enemy_territories = a_or_b(group['tgt'], group['target'])
-                other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1
+                friendly_territories = a_and_b(a_minus_b(self.border_territories, [src, tgt]), self.state.get_all_adjacent_territories(group['target']))
+                friendly_troops = 0
+                if len(friendly_territories) != 0:
+                    for enemy_territory in enemy_territories:
+                        cands = a_and_b(self.state.map.get_adjacent_to(enemy_territory), friendly_territories)
+                        if len(cands) == 0:
+                            continue
+                        max_cand = max(cands, key=lambda x:self.state.territories[x].troops)
+                        diff = self.state.territories[max_cand].troops - self.state.territories[enemy_territory].troops
+                        if diff > 2:
+                            friendly_troops += diff
+                            friendly_territories.remove(max_cand)
+
+                other_enemy += self.sum_up_troops(enemy_territories) + len(enemy_territories) - 1 - friendly_troops
+        
+        other_enemy = max(0, other_enemy)
 
         if other_enemy == 0:
             write_log(self.clock, "AfterAttack", f"no sharing src with other attack plan move all troops {max_troops - 1}")
@@ -1464,6 +1488,9 @@ class BotState:
         border_territories = list(set(self.border_territories) & set(group))
         border_territories = sorted(border_territories, key=lambda x:self.state.territories[x].troops, reverse=True)
         for border_territory in border_territories:
+            for name in self.continent_owned_by[self.id_me]:
+                if border_territory in DOOR[name]:
+                    continue 
             outer_troops = self.state.territories[border_territory].troops
             enemy_adj_territories = list(set(self.state.map.get_adjacent_to(border_territory)) - set(self.territories[self.id_me]))
             enemy_troops = 0
@@ -1653,8 +1680,6 @@ def handle_distribute_troops(game: Game, bot_state: BotState, query: QueryDistri
             
     # step 0 update all information
     bot_state.update_status()
-    for pid in bot_state.id_all_player:
-        bot_state.write_player_information(pid)
     
     # plan
     if bot_state.is_end_game():
